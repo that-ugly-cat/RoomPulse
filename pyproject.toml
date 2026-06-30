@@ -1,0 +1,16 @@
+[project]
+name = "roompulse"
+version = "0.1.0"
+description = "RoomPulse — live polling per presentazioni (stile Mentimeter), tarato su keynote/lezioni di bioetica."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "segno>=1.6",
+    "python-jose[cryptography]>=3.3",
+    "bcrypt>=4.0",
+    "anthropic>=0.40",
+]
+
+[tool.uv]
+package = false

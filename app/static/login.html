@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoomPulse</title>
+<link rel="icon" href="/static/imgs/favicon.png">
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --fg:#e8eaed; --muted:#9aa0ab;
+          --accent:#16a3ab; --bar:#2a2e38; --danger:#d9554f; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; background:var(--bg); color:var(--fg);
+         font-family:system-ui,-apple-system,Segoe UI,sans-serif; }
+  .brand { flex:1; display:flex; flex-direction:column; justify-content:center;
+           padding:4rem; border-right:1px solid var(--bar); min-width:0; }
+  .brand .logo { display:block; width:100%; max-width:320px; height:auto; margin-bottom:1.6rem; }
+  .brand .tagline { font-size:1.05rem; color:var(--muted); line-height:1.7; max-width:520px; margin-bottom:2.2rem; }
+  .brand ul { list-style:none; padding:0; margin:0; max-width:520px; }
+  .brand li { color:var(--muted); padding:8px 0 8px 26px; position:relative; line-height:1.5; }
+  .brand li::before { content:"›"; position:absolute; left:6px; color:var(--accent); font-weight:700; }
+  .auth { width:420px; max-width:100%; display:flex; flex-direction:column; justify-content:center;
+          padding:3rem 2.5rem; position:relative; }
+  .auth h2 { font-size:1.3rem; margin:0 0 4px; }
+  .auth .sub { color:var(--muted); font-size:.9rem; margin:0 0 22px; }
+  label { font-size:.78rem; color:var(--muted); display:block; margin-top:14px; }
+  input { width:100%; padding:12px; border-radius:10px; margin-top:5px;
+          border:1px solid var(--bar); background:#20242d; color:var(--fg); font-size:1rem; }
+  button.go { width:100%; margin-top:22px; padding:13px; border:0; border-radius:10px;
+        background:var(--accent); color:#04201f; font-weight:700; font-size:1rem; cursor:pointer; }
+  .err { color:var(--danger); font-size:.85rem; margin-top:12px; min-height:1em; }
+  .switch { margin-top:18px; font-size:.9rem; }
+  .switch a { color:var(--accent); cursor:pointer; }
+  select.lang { position:absolute; top:18px; right:22px; background:#20242d; color:var(--muted);
+        border:1px solid var(--bar); border-radius:8px; padding:4px 6px; font-size:.8rem; }
+  @media (max-width:760px) {
+    body { flex-direction:column; }
+    .brand { border-right:0; border-bottom:1px solid var(--bar); padding:2.2rem; }
+    .brand .tagline { margin-bottom:1rem; } .brand ul { display:none; }
+    .auth { width:100%; padding:2rem; }
+  }
+</style>
+</head>
+<body>
+  <section class="brand">
+    <img class="logo" src="/static/imgs/logo.png" alt="RoomPulse" onerror="this.outerHTML='<div style=\'font-size:1.6rem;font-weight:800;letter-spacing:.14em;margin-bottom:1.4rem\'>ROOMPULSE</div>'">
+    <p class="tagline" data-i18n="login_tagline"></p>
+    <ul>
+      <li data-i18n="login_f1"></li>
+      <li data-i18n="login_f2"></li>
+      <li data-i18n="login_f3"></li>
+    </ul>
+  </section>
+
+  <section class="auth">
+    <select class="lang" id="lang"><option value="it">IT</option><option value="en">EN</option><option value="de">DE</option></select>
+    <h2 id="formtitle"></h2>
+    <p class="sub" id="formsub"></p>
+    <form id="form">
+      <div id="namewrap" style="display:none"><label data-i18n="name"></label><input id="name" autocomplete="name"></div>
+      <label data-i18n="email"></label><input id="email" type="email" autocomplete="username" autofocus>
+      <label data-i18n="password"></label><input id="password" type="password" autocomplete="current-password">
+      <div id="codewrap" style="display:none"><label data-i18n="signup_code"></label><input id="signup_code"></div>
+      <button type="submit" class="go" id="submitbtn"></button>
+      <div class="err" id="err"></div>
+    </form>
+    <p class="switch"><a id="toggle"></a></p>
+  </section>
+
+<script>
+const $ = s => document.querySelector(s);
+const SUPP = ["it","en","de"];
+let lang = localStorage.getItem("rp_lang") || (navigator.language||"it").slice(0,2);
+if (!SUPP.includes(lang)) lang = "it";
+let T = {};
+let mode = "login";        // login | register
+let codeRequired = false;
+
+async function init() {
+  T = (await (await fetch("/api/i18n?lang="+lang)).json()).t;
+  document.documentElement.lang = lang;
+  $("#lang").value = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => el.textContent = T[el.dataset.i18n] || "");
+  try { codeRequired = (await (await fetch("/api/auth-config")).json()).signup_code_required; } catch {}
+  applyMode();
+}
+$("#lang").onchange = () => { localStorage.setItem("rp_lang", $("#lang").value); location.reload(); };
+
+function applyMode() {
+  const reg = mode === "register";
+  $("#formtitle").textContent = reg ? T.create_account : T.login_sub;
+  $("#formsub").textContent = "";
+  $("#submitbtn").textContent = reg ? T.create_account : T.enter;
+  $("#namewrap").style.display = reg ? "block" : "none";
+  $("#codewrap").style.display = (reg && codeRequired) ? "block" : "none";
+  $("#toggle").textContent = reg ? T.have_account : T.no_account;
+  $("#err").textContent = "";
+}
+$("#toggle").onclick = () => { mode = mode === "login" ? "register" : "login"; applyMode(); };
+
+$("#form").onsubmit = async (e) => {
+  e.preventDefault(); $("#err").textContent = "";
+  const email = $("#email").value.trim(), password = $("#password").value;
+  if (mode === "register") {
+    const body = {email, password, name:$("#name").value.trim(), signup_code:$("#signup_code").value};
+    const res = await fetch("/api/register", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    if (res.ok) { location.href = "/edit"; }
+    else { const e2 = await res.json().catch(()=>({})); $("#err").textContent = e2.detail || T.register_error; }
+  } else {
+    const res = await fetch("/api/login", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({email, password})});
+    if (res.ok) { location.href = new URLSearchParams(location.search).get("next") || "/edit"; }
+    else { $("#err").textContent = T.wrong_creds; }
+  }
+};
+
+init();
+</script>
+</body>
+</html>

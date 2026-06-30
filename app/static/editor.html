@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoomPulse — editor</title>
+<link rel="icon" href="/static/imgs/favicon.png">
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --fg:#e8eaed; --muted:#9aa0ab;
+          --accent:#16a3ab; --bar:#2a2e38; --danger:#d9554f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif;
+         background:var(--bg); color:var(--fg); }
+  .grid { display:grid; grid-template-columns:300px 1fr; min-height:100vh; }
+  .side { background:#14171d; padding:18px; border-right:1px solid var(--bar); }
+  .main { padding:28px 36px; max-width:780px; }
+  h1 { font-size:.8rem; color:var(--muted); letter-spacing:.1em; margin:0 0 14px; }
+  h2 { font-size:1.1rem; margin:24px 0 10px; }
+  ul { list-style:none; padding:0; margin:0; }
+  .plist li { padding:10px 12px; border-radius:9px; margin:6px 0; background:#1c2027;
+        cursor:pointer; font-size:.92rem; border:1px solid transparent; }
+  .plist li:hover { border-color:var(--bar); }
+  .plist li.sel { border-color:var(--accent); background:#13343a; }
+  .plist .meta { color:var(--muted); font-size:.75rem; }
+  input, select, textarea { width:100%; padding:10px 12px; border-radius:9px; margin:5px 0;
+        border:1px solid var(--bar); background:#20242d; color:var(--fg); font-size:.95rem; font-family:inherit; }
+  label { font-size:.8rem; color:var(--muted); display:block; margin-top:10px; }
+  button { padding:10px 16px; border:0; border-radius:9px; font-weight:700; cursor:pointer;
+        background:var(--card); color:var(--fg); border:1px solid var(--bar); }
+  button.primary { background:var(--accent); color:#04201f; border:0; }
+  button.sm { padding:5px 10px; font-size:.8rem; }
+  button.danger { background:transparent; color:var(--danger); border:1px solid #3a2422; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .slide { background:var(--card); border-radius:11px; padding:12px 14px; margin:9px 0; }
+  .slide .t { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .slide-head { display:flex; align-items:center; gap:10px; cursor:pointer; }
+  .slide-head .dh { color:var(--muted); cursor:grab; touch-action:none; user-select:none; font-size:1.1rem; }
+  .slide-head .qx { flex:1; }
+  .slide-head .chev { color:var(--muted); font-size:.8rem; }
+  .slide-body { margin-top:10px; padding-top:10px; border-top:1px solid var(--bar); font-size:.88rem; }
+  .cfgrow { margin:5px 0; }
+  .cfgrow b { color:var(--muted); font-weight:600; }
+  .chip { background:#20242d; border:1px solid var(--bar); border-radius:6px; padding:1px 8px;
+        display:inline-block; margin:2px 3px 2px 0; font-size:.82rem; }
+  .cfgflag { color:var(--accent); font-size:.82rem; margin:4px 0; }
+  .links { background:#13343a; border-radius:11px; padding:14px 16px; margin:14px 0; font-size:.9rem; }
+  .links code { background:#0e2a2e; padding:2px 7px; border-radius:5px; }
+  .links a { color:var(--accent); }
+  .opt-row { display:flex; gap:6px; margin:4px 0; }
+  .opt-row input { margin:0; }
+  .muted { color:var(--muted); }
+  .card { background:var(--card); border-radius:12px; padding:18px; margin-top:14px; }
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.65); display:none;
+        align-items:center; justify-content:center; z-index:100; }
+  .overlay.show { display:flex; }
+  .modal { background:var(--card); border-radius:16px; padding:28px; max-width:460px; width:90%;
+        border:1px solid var(--danger); }
+  .modal h3 { margin:0 0 12px; font-size:1.3rem; }
+  .modal p { color:var(--muted); line-height:1.55; margin:0; }
+  .modal .actions { display:flex; gap:10px; margin-top:24px; justify-content:flex-end; }
+  .modal .actions button { padding:11px 18px; }
+  .modal .actions button.del { background:var(--danger); color:#fff; border:0; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <aside class="side">
+    <h1>ROOMPULSE · EDITOR <a href="#" id="logout" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0">esci</a><a href="#" id="settingsbtn" title="settings" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0;margin-right:10px">⚙</a></h1>
+    <select id="lang" style="background:#20242d;color:var(--muted);border:1px solid var(--bar);border-radius:8px;padding:4px 7px;font-size:.8rem;margin-bottom:8px">
+      <option value="it">IT</option><option value="en">EN</option><option value="de">DE</option></select>
+    <div class="row"><input id="newtitle" placeholder="Titolo nuova deck">
+      <button class="primary sm" id="create">+</button></div>
+    <button class="sm" id="importbtn" style="margin-top:6px;width:100%">Importa deck</button>
+    <input type="file" id="importfile" accept=".json,application/json" style="display:none">
+    <ul class="plist" id="plist"></ul>
+  </aside>
+  <main class="main" id="main"><p class="muted" id="placeholder">Crea o seleziona una deck a sinistra.</p></main>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3 id="m-title"></h3>
+    <p id="m-body"></p>
+    <div class="actions">
+      <button id="m-cancel"></button>
+      <button class="del" id="m-confirm"></button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="setoverlay">
+  <div class="modal" style="border-color:var(--bar)">
+    <h3 id="set-title"></h3>
+    <label id="set-apilabel"></label>
+    <input id="set-apikey" type="password">
+    <p class="muted" id="set-status" style="font-size:.8rem;margin:6px 0 0"></p>
+    <div class="actions">
+      <button id="set-cancel">✕</button>
+      <button class="primary" id="set-save"></button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (s,r=document)=>r.querySelector(s);
+const TYPES = ["mc","scale","wordcloud","quadrant","ranking","points","opentext","qa","argpoll","groups"];
+let presentations = [];
+let current = null;   // dettaglio presentation selezionata
+
+// i18n
+const SUPP = ["it","en","de"];
+let lang = localStorage.getItem("rp_lang") || (navigator.language||"it").slice(0,2);
+if (!SUPP.includes(lang)) lang = "it";
+let T = {};
+async function initI18n() {
+  T = (await (await fetch("/api/i18n?lang="+lang)).json()).t;
+  document.documentElement.lang = lang;
+  $("#lang").value = lang;
+  $("#logout").textContent = T.logout;
+  $("#importbtn").textContent = T.import_deck;
+  $("#newtitle").placeholder = T.new_deck_ph;
+  if ($("#placeholder")) $("#placeholder").textContent = T.pick_deck;
+}
+
+async function loadList() {
+  const res = await fetch("/api/presentations");
+  if (res.status === 401) { location.href = "/login?next=/edit"; return; }
+  presentations = await res.json();
+  $("#plist").innerHTML = presentations.map(p =>
+    `<li data-id="${p.id}" class="${current&&current.id===p.id?'sel':''}">
+       <div>${p.title}</div>
+       <div class="meta">${T.code_label} ${p.join_code} · ${p.n_slides} ${T.slides_word}</div></li>`).join("");
+  $("#plist").querySelectorAll("li").forEach(li =>
+    li.onclick = () => selectP(li.dataset.id));
+}
+
+$("#create").onclick = async () => {
+  const title = $("#newtitle").value.trim() || "Senza titolo";
+  const res = await fetch("/api/presentations", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({title})});
+  const d = await res.json();
+  $("#newtitle").value = "";
+  await loadList(); selectP(d.id);
+};
+
+async function selectP(id) {
+  const res = await fetch(`/api/presentations/${id}`, {cache:"no-store"});
+  if (res.status === 401) { location.href = "/login?next=/edit"; return; }
+  if (!res.ok) { alert("Errore nel caricare la deck (HTTP " + res.status + ")."); return; }
+  current = await res.json();
+  await loadList();
+  renderDeck();
+}
+
+function renderDeck() {
+  const p = current;
+  $("#main").innerHTML = `
+    <div class="row" style="align-items:center;gap:8px">
+      <h2 id="decktitle" style="margin:0">${p.title}</h2>
+      <button class="sm" id="renamedeck" title="${T.rename_deck}">✎</button>
+    </div>
+    <div class="links">
+      ${T.public_code} <code>${p.join_code}</code> ·
+      <a href="/present?p=${p.id}" target="_blank">${T.ed_presenter} ↗</a> ·
+      <a href="/?c=${p.join_code}" target="_blank">${T.ed_audience} ↗</a>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="sm" id="exportdeck">${T.export_deck}</button>
+      <button class="sm" id="exportdata">${T.export_data}</button>
+      <button class="danger sm" id="deldeck">${T.delete_deck}</button>
+    </div>
+    <h2>${T.slides_label} (${p.slides.length})</h2>
+    <div id="slides"></div>
+    <div class="card" id="addbox"></div>`;
+  $("#deldeck").onclick = () => openDeleteDeck(p.id);
+  $("#exportdeck").onclick = () => exportDeck(p.id);
+  $("#exportdata").onclick = () => exportData(p.id);
+  $("#renamedeck").onclick = () => renameDeck(p);
+  $("#slides").innerHTML = p.slides.length ? p.slides.map(s => `
+    <div class="slide" data-id="${s.id}">
+      <div class="slide-head">
+        <span class="dh" title="trascina per riordinare">≡</span>
+        <span class="t">${s.ord}. ${T["type_"+s.type]||s.type}</span>
+        <span class="qx">${s.question}</span>
+        <span class="chev">▸</span>
+        <button class="danger sm" data-del="${s.id}">${T.delete}</button>
+      </div>
+      <div class="slide-body" style="display:none">${slideConfigHtml(s)}</div>
+    </div>`).join("") : `<p class="muted">${T.no_slides}</p>`;
+  $("#slides").querySelectorAll(".slide-head").forEach(head => {
+    head.onclick = (e) => {
+      if (e.target.closest("[data-del]") || e.target.classList.contains("dh")) return;
+      const body = head.parentElement.querySelector(".slide-body");
+      const open = body.style.display !== "none";
+      body.style.display = open ? "none" : "block";
+      head.querySelector(".chev").textContent = open ? "▸" : "▾";
+    };
+  });
+  $("#slides").querySelectorAll("[data-del]").forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    await fetch(`/api/slides/${b.dataset.del}`, {method:"DELETE"});
+    selectP(p.id);
+  });
+  wireSlideDrag(p.id);
+  renderAddBox();
+}
+
+function slideConfigHtml(s) {
+  const c = s.config || {};
+  const rows = [];
+  const chips = (label, items) =>
+    `<div class="cfgrow"><b>${label}:</b> ${items.map(i=>`<span class="chip">${i}</span>`).join(" ")}</div>`;
+  if (s.type === "mc") {
+    if (c.quiz) {
+      const correct = c.correct || [];
+      rows.push(`<div class="cfgrow"><b>${T.options_label}:</b> ` +
+        (c.options||[]).map(o => `<span class="chip"${correct.includes(o.id)?' style="border-color:#3fb950;color:#3fb950"':''}>${o.label}${correct.includes(o.id)?' ✓':''}</span>`).join(" ") + `</div>`);
+      rows.push(`<div class="cfgflag">✓ ${T.quiz_mode}</div>`);
+    } else {
+      rows.push(chips(T.options_label, (c.options||[]).map(o=>o.label)));
+      if (c.allow_other) rows.push(`<div class="cfgflag">✓ ${T.allow_other_opt}</div>`);
+    }
+    if (c.multi) rows.push(`<div class="cfgflag">✓ ${T.allow_multiple}</div>`);
+  } else if (s.type === "scale") {
+    rows.push(`<div class="cfgrow"><b>Min</b> ${c.min} · <b>Max</b> ${c.max}</div>`);
+    if (c.min_label || c.max_label) rows.push(`<div class="cfgrow muted">${c.min_label||""} … ${c.max_label||""}</div>`);
+  } else if (s.type === "quadrant") {
+    const L = c.labels||{};
+    rows.push(`<div class="cfgrow"><b>x</b>: ${L.x_left||"–"} ↔ ${L.x_right||"–"}</div>`);
+    rows.push(`<div class="cfgrow"><b>y</b>: ${L.y_bottom||"–"} ↕ ${L.y_top||"–"}</div>`);
+  } else if (s.type === "ranking") {
+    rows.push(chips(T.rank_items_label, (c.items||[]).map(i=>i.label)));
+  } else if (s.type === "points") {
+    rows.push(chips(T.points_options_label, (c.options||[]).map(o=>o.label)));
+  } else if (s.type === "groups") {
+    rows.push(chips(T.groups_label, (c.groups||[]).map(g=>g.name)));
+  } else if (s.type === "argpoll") {
+    rows.push(`<div class="cfgrow muted">${c.claim_label||T.claim_default} / ${c.justification_label||T.just_default}</div>`);
+  } else {
+    rows.push(`<div class="cfgrow muted">${T.no_config}</div>`);
+  }
+  if (s.pair_id) {
+    const pre = current.slides.find(x => x.id === s.pair_id);
+    rows.push(`<div class="cfgrow">↪ ${T.post_of} ${pre ? pre.ord+". "+pre.question : s.pair_id}</div>`);
+  }
+  return rows.join("");
+}
+
+function wireSlideDrag(pid) {
+  const cont = $("#slides");
+  let drag = null;
+  cont.querySelectorAll(".slide").forEach(row => {
+    const dh = row.querySelector(".dh");
+    if (!dh) return;
+    dh.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); drag = row; dh.setPointerCapture(e.pointerId); row.style.opacity = ".5";
+    });
+    dh.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const after = [...cont.querySelectorAll(".slide")].find(r => {
+        if (r === drag) return false;
+        const b = r.getBoundingClientRect();
+        return e.clientY < b.top + b.height/2;
+      });
+      if (after) cont.insertBefore(drag, after); else cont.appendChild(drag);
+    });
+    const end = async () => {
+      if (!drag) return; drag.style.opacity = ""; drag = null;
+      const ids = [...cont.querySelectorAll(".slide")].map(r => r.dataset.id);
+      await fetch(`/api/presentations/${pid}/reorder`, {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({slide_ids:ids})});
+      selectP(pid);
+    };
+    dh.addEventListener("pointerup", end);
+    dh.addEventListener("pointercancel", end);
+  });
+}
+
+async function exportDeck(id) {
+  const res = await fetch(`/api/presentations/${id}/export`);
+  if (!res.ok) { alert("Errore export"); return; }
+  const data = await res.json();
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:"application/json"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (data.title||"deck").replace(/[^a-z0-9]+/gi,"_").toLowerCase() + ".roompulse.json";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function exportData(id) {
+  const res = await fetch(`/api/presentations/${id}/data.csv`);
+  if (!res.ok) { const e = await res.json().catch(()=>({})); alert(e.detail || "Errore export dati"); return; }
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "roompulse_dati.csv";
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+async function importDeck(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    const res = await fetch("/api/presentations/import", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({title: data.title || "Deck importata", slides: data.slides || []})});
+    if (res.ok) { const d = await res.json(); await loadList(); selectP(d.id); }
+    else { alert(T.import_error); }
+  } catch { alert(T.import_error); }
+}
+
+function renameDeck(p) {
+  const wrap = $("#decktitle").parentElement;
+  wrap.innerHTML = `<input id="rn" value="${p.title.replace(/"/g,'&quot;')}" style="flex:1;font-size:1.2rem">
+    <button class="primary sm" id="rnsave">✓</button><button class="sm" id="rncancel">✕</button>`;
+  const inp = $("#rn"); inp.focus(); inp.select();
+  const save = async () => {
+    const title = inp.value.trim();
+    if (!title) { selectP(p.id); return; }
+    const res = await fetch(`/api/presentations/${p.id}`, {method:"PATCH",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({title})});
+    if (res.ok) selectP(p.id); else alert("Errore (HTTP " + res.status + ")");
+  };
+  $("#rnsave").onclick = save;
+  $("#rncancel").onclick = () => selectP(p.id);
+  inp.onkeydown = (e) => { if (e.key === "Enter") save(); if (e.key === "Escape") selectP(p.id); };
+}
+
+async function openSettings() {
+  $("#set-title").textContent = T.settings;
+  $("#set-apilabel").textContent = T.api_key_label;
+  $("#set-apikey").placeholder = T.api_key_ph;
+  $("#set-apikey").value = "";
+  $("#set-save").textContent = T.save;
+  try {
+    const me = await (await fetch("/api/me")).json();
+    $("#set-status").textContent = me.api_key_set ? `${T.api_key_set} (${me.api_key_hint})` : "—";
+  } catch { $("#set-status").textContent = "—"; }
+  $("#setoverlay").classList.add("show");
+  $("#set-cancel").onclick = () => $("#setoverlay").classList.remove("show");
+  $("#set-save").onclick = async () => {
+    const k = $("#set-apikey").value.trim();
+    await fetch("/api/me/api-key", {method:"PUT", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({api_key:k})});
+    $("#setoverlay").classList.remove("show");
+  };
+}
+
+function openDeleteDeck(id) {
+  $("#m-title").textContent = T.delete_deck_title;
+  $("#m-body").textContent = T.delete_deck_body;
+  $("#m-cancel").textContent = T.cancel;
+  $("#m-confirm").textContent = T.confirm_delete;
+  $("#overlay").classList.add("show");
+  $("#m-cancel").onclick = () => $("#overlay").classList.remove("show");
+  $("#m-confirm").onclick = async () => {
+    const res = await fetch(`/api/presentations/${id}`, {method:"DELETE"});
+    $("#overlay").classList.remove("show");
+    if (res.ok) {
+      current = null;
+      $("#main").innerHTML = `<p class="muted">${T.pick_deck}</p>`;
+      loadList();
+    } else { alert("Errore (HTTP " + res.status + ")"); }
+  };
+}
+
+function renderAddBox() {
+  $("#addbox").innerHTML = `
+    <h2 style="margin-top:0">${T.add_slide}</h2>
+    <label>${T.type_label}</label>
+    <select id="stype">${TYPES.map(t=>`<option value="${t}">${T["type_"+t]}</option>`).join("")}</select>
+    <label>${T.question_label}</label>
+    <textarea id="squestion" rows="2" placeholder="${T.question_ph}"></textarea>
+    <div id="cfg"></div>
+    <div id="pairbox"></div>
+    <button class="primary" id="addslide" style="margin-top:12px">${T.add}</button>`;
+  $("#stype").onchange = () => { renderCfg(); renderPairBox(); };
+  renderCfg(); renderPairBox();
+  $("#addslide").onclick = addSlide;
+}
+
+const PREPOST_TYPES = ["scale","mc","quadrant"];
+function renderPairBox() {
+  const t = $("#stype").value;
+  const box = $("#pairbox");
+  const cands = current.slides.filter(s => s.type === t);   // solo stesso tipo
+  if (!PREPOST_TYPES.includes(t) || !cands.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<label>${T.prepost_label}</label>
+    <select id="pairsel"><option value="">${T.no_link}</option>
+    ${cands.map(s=>`<option value="${s.id}">${T.post_of} ${s.ord}. ${s.question}</option>`).join("")}</select>`;
+}
+
+function listEditor(label, holderId) {
+  return `<label>${label}</label><div id="${holderId}"></div>
+    <button class="sm" id="${holderId}-add" type="button">${T.add_item}</button>`;
+}
+
+function wireList(holderId) {
+  const holder = $("#"+holderId);
+  const addRow = (val="") => {
+    const div = document.createElement("div"); div.className="opt-row";
+    div.innerHTML = `<input placeholder="${T.item_ph}" value="${val}">
+      <button class="sm" type="button">✕</button>`;
+    div.querySelector("button").onclick = () => div.remove();
+    holder.appendChild(div);
+  };
+  $(`#${holderId}-add`).onclick = () => addRow();
+  addRow(); addRow();
+  return () => [...holder.querySelectorAll("input")].map(i=>i.value.trim()).filter(Boolean);
+}
+let getItems = null;
+
+function mcOptsInit() {
+  const addRow = (label="", correct=false) => {
+    const quiz = $("#mcquiz").checked;
+    const div = document.createElement("div"); div.className = "opt-row";
+    div.innerHTML = `<input class="olabel" placeholder="${T.item_ph}" value="${label}">
+      <label class="ocorrect-wrap" style="display:${quiz?'inline-flex':'none'};align-items:center;gap:4px;white-space:nowrap;font-size:.78rem;color:var(--muted)">
+        <input type="checkbox" class="ocorrect" style="width:auto;margin:0" ${correct?'checked':''}> ${T.correct}</label>
+      <button class="sm" type="button">✕</button>`;
+    div.querySelector("button").onclick = () => div.remove();
+    $("#opts").appendChild(div);
+  };
+  $("#opts-add").onclick = () => addRow();
+  addRow(); addRow();
+  const syncQuiz = () => {
+    const quiz = $("#mcquiz").checked;
+    document.querySelectorAll("#opts .ocorrect-wrap").forEach(w => w.style.display = quiz ? "inline-flex" : "none");
+    $("#mcother-row").style.display = quiz ? "none" : "flex";
+    if (quiz) $("#mcother").checked = false;
+    $("#quizhint").style.display = quiz ? "block" : "none";
+  };
+  $("#mcquiz").onchange = syncQuiz;
+  syncQuiz();
+}
+
+function renderCfg() {
+  const t = $("#stype").value;
+  const cfg = $("#cfg"); getItems = null;
+  if (t === "mc") {
+    cfg.innerHTML = `<label>${T.options_label}</label><div id="opts"></div>
+      <button class="sm" id="opts-add" type="button">${T.add_item}</button>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" id="mcmulti" style="width:auto;margin:0"> ${T.allow_multiple}</label>
+      <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="mcquiz" style="width:auto;margin:0"> ${T.quiz_mode}</label>
+      <label id="mcother-row" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="mcother" style="width:auto;margin:0"> ${T.allow_other_opt}</label>
+      <p class="muted" id="quizhint" style="display:none;font-size:.8rem;margin:6px 0 0">${T.quiz_hint}</p>`;
+    mcOptsInit();
+    getItems = null;  // mc letto direttamente in buildConfig
+  }
+  else if (t === "ranking") { cfg.innerHTML = listEditor(T.rank_items_label,"opts"); getItems = wireList("opts"); }
+  else if (t === "groups") { cfg.innerHTML = listEditor(T.groups_label,"opts"); getItems = wireList("opts"); }
+  else if (t === "points") { cfg.innerHTML = listEditor(T.points_options_label,"opts"); getItems = wireList("opts"); }
+  else if (t === "scale") {
+    cfg.innerHTML = `<div class="row"><div><label>Min</label><input id="smin" type="number" value="1"></div>
+      <div><label>Max</label><input id="smax" type="number" value="5"></div></div>
+      <label>${T.scale_min_label}</label><input id="slmin" placeholder="${T.scale_min_ph}">
+      <label>${T.scale_max_label}</label><input id="slmax" placeholder="${T.scale_max_ph}">`;
+  }
+  else if (t === "quadrant") {
+    cfg.innerHTML = `<label>${T.quad_xl}</label><input id="qxl">
+      <label>${T.quad_xr}</label><input id="qxr">
+      <label>${T.quad_yt}</label><input id="qyt">
+      <label>${T.quad_yb}</label><input id="qyb">`;
+  }
+  else if (t === "argpoll") {
+    cfg.innerHTML = `<label>${T.claim_field_label}</label><input id="acl" placeholder="${T.claim_field_ph}">
+      <label>${T.just_field_label}</label><input id="ajl" placeholder="${T.just_field_ph}">`;
+  }
+  else { cfg.innerHTML = `<p class="muted">${T.no_config}</p>`; }
+}
+
+function buildConfig(t) {
+  if (t === "mc") {
+    const rows = [...document.querySelectorAll("#opts .opt-row")].map(r => ({
+      label: r.querySelector(".olabel").value.trim(),
+      correct: r.querySelector(".ocorrect") ? r.querySelector(".ocorrect").checked : false,
+    })).filter(r => r.label);
+    const options = rows.map((r,i)=>({id:String.fromCharCode(97+i), label:r.label}));
+    const cfg = {options, multi: $("#mcmulti").checked};
+    if ($("#mcquiz").checked) {
+      cfg.quiz = true;
+      cfg.correct = rows.map((r,i)=> r.correct ? String.fromCharCode(97+i) : null).filter(Boolean);
+    } else {
+      cfg.allow_other = $("#mcother").checked;
+    }
+    return cfg;
+  }
+  if (t === "ranking") return {items: getItems().map((l,i)=>({id:String.fromCharCode(97+i),label:l}))};
+  if (t === "groups") return {groups: getItems().map((l,i)=>({id:"g"+i, name:l}))};
+  if (t === "points") return {options: getItems().map((l,i)=>({id:String.fromCharCode(97+i),label:l})), total:100};
+  if (t === "scale") return {min:Number($("#smin").value), max:Number($("#smax").value),
+                             min_label:$("#slmin").value, max_label:$("#slmax").value};
+  if (t === "quadrant") return {labels:{x_left:$("#qxl").value, x_right:$("#qxr").value,
+                                        y_top:$("#qyt").value, y_bottom:$("#qyb").value}};
+  if (t === "argpoll") return {claim_label:$("#acl").value, justification_label:$("#ajl").value};
+  return {};
+}
+
+async function addSlide() {
+  const t = $("#stype").value;
+  const question = $("#squestion").value.trim();
+  if (!question) { alert(T.write_question_alert); return; }
+  const pairEl = $("#pairsel");
+  const pair_id = pairEl ? (pairEl.value || null) : null;
+  await fetch(`/api/presentations/${current.id}/slides`, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({type:t, question, config:buildConfig(t), pair_id})});
+  selectP(current.id);
+}
+
+$("#logout").onclick = async (e) => { e.preventDefault();
+  await fetch("/api/logout", {method:"POST"}); location.href = "/login"; };
+$("#lang").onchange = () => { localStorage.setItem("rp_lang", $("#lang").value); location.reload(); };
+$("#settingsbtn").onclick = (e) => { e.preventDefault(); openSettings(); };
+$("#importbtn").onclick = () => $("#importfile").click();
+$("#importfile").onchange = (e) => { if (e.target.files[0]) importDeck(e.target.files[0]); e.target.value = ""; };
+
+initI18n().then(loadList);
+</script>
+</body>
+</html>

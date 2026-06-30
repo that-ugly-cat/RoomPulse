@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoomPulse</title>
+<link rel="icon" href="/static/imgs/favicon.png">
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --fg:#e8eaed; --muted:#9aa0ab;
+          --accent:#16a3ab; --bar:#2a2e38; --ok:#3fb950; --danger:#d9554f; }
+  .meta { color:var(--muted); }
+  .big { font-size:2rem; font-weight:800; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif;
+         background:var(--bg); color:var(--fg); min-height:100vh; }
+  .wrap { max-width:560px; margin:0 auto; padding:24px 18px 60px; }
+  h1 { font-size:1.1rem; color:var(--muted); font-weight:600; letter-spacing:.04em; }
+  .card { background:var(--card); border-radius:14px; padding:22px; margin-top:16px; }
+  .q { font-size:1.35rem; font-weight:600; line-height:1.3; margin:0 0 18px; }
+  button.opt { display:block; width:100%; text-align:left; padding:15px 16px; margin:9px 0;
+        border:1px solid var(--bar); border-radius:11px; background:#20242d; color:var(--fg);
+        font-size:1rem; cursor:pointer; transition:.12s; }
+  button.opt:hover { border-color:var(--accent); }
+  button.opt.sel { border-color:var(--accent); background:#13343a; }
+  button.opt.correct { border-color:#3fb950; background:#16331f; color:#bff3cc; }
+  button.opt.wrong { border-color:var(--danger); background:#331a1c; color:#f0b8b8; }
+  .scale { display:flex; gap:8px; justify-content:space-between; margin:8px 0 4px; }
+  .scale button { flex:1; padding:16px 0; font-size:1.15rem; border-radius:11px;
+        border:1px solid var(--bar); background:#20242d; color:var(--fg); cursor:pointer; }
+  .scale button.sel { border-color:var(--accent); background:#13343a; }
+  .lbl { display:flex; justify-content:space-between; color:var(--muted); font-size:.8rem; }
+  .code { font-size:.85rem; color:var(--muted); margin-top:10px; }
+  .codebox { display:flex; gap:10px; margin-top:14px; }
+  .codebox input { flex:1; padding:14px; font-size:1.3rem; letter-spacing:.3em; text-align:center;
+        border-radius:11px; border:1px solid var(--bar); background:#20242d; color:var(--fg); }
+  .codebox button, .send { padding:14px 18px; border:0; border-radius:11px; background:var(--accent);
+        color:#04201f; font-weight:700; font-size:1rem; cursor:pointer; }
+  .send { width:100%; margin-top:14px; }
+  .send:disabled { opacity:.4; cursor:default; }
+  .muted { color:var(--muted); }
+  input.txt, textarea.txt { width:100%; padding:14px; font-size:1.05rem; border-radius:11px;
+        border:1px solid var(--bar); background:#20242d; color:var(--fg); font-family:inherit; }
+  textarea.txt { min-height:90px; resize:vertical; }
+  .rk { display:flex; align-items:center; gap:10px; padding:12px 14px; margin:8px 0;
+        background:#20242d; border:1px solid var(--bar); border-radius:11px; }
+  .rk .grip { color:var(--muted); }
+  .rk .nm { flex:1; }
+  .rk button { padding:6px 11px; border-radius:8px; border:1px solid var(--bar);
+        background:#181b22; color:var(--fg); cursor:pointer; }
+  .qv.sel { border-color:var(--accent); background:#13343a; color:var(--accent); }
+  .ctag { background:#33290f; color:#e0bd57; border-radius:20px; padding:2px 9px; font-size:.7rem; white-space:nowrap; }
+  .atag { background:#13343a; color:var(--accent); border-radius:20px; padding:2px 9px; font-size:.7rem; white-space:nowrap; }
+  .pt { display:flex; align-items:center; gap:12px; margin:9px 0; }
+  .pt .nm { flex:1; }
+  .pt input { width:74px; padding:10px; text-align:center; border-radius:9px;
+        border:1px solid var(--bar); background:#20242d; color:var(--fg); }
+  .remaining { font-weight:700; }
+  .pad { position:relative; width:100%; aspect-ratio:1; background:#181b22; border:1px solid var(--bar);
+        border-radius:12px; margin:6px 0; touch-action:none; }
+  .pad .axis { position:absolute; background:var(--bar); }
+  .pad .axis.h { left:0; right:0; top:50%; height:1px; }
+  .pad .axis.v { top:0; bottom:0; left:50%; width:1px; }
+  .pad .dot { position:absolute; width:18px; height:18px; border-radius:50%; background:var(--accent);
+        transform:translate(-50%,-50%); box-shadow:0 0 0 4px rgba(22,163,171,.25); }
+  .pad .pl { position:absolute; color:var(--muted); font-size:.74rem; }
+  .pl.t { top:6px; left:50%; transform:translateX(-50%); }
+  .pl.b { bottom:6px; left:50%; transform:translateX(-50%); }
+  .pl.l { left:6px; top:50%; transform:translateY(-50%); }
+  .pl.r { right:6px; top:50%; transform:translateY(-50%); }
+  .barrow { display:flex; align-items:center; gap:10px; margin:7px 0; }
+  .barrow .name { width:46%; font-size:.92rem; }
+  .bartrack { flex:1; background:var(--bar); border-radius:6px; height:26px; overflow:hidden; }
+  .barfill { height:100%; background:var(--accent); border-radius:6px; transition:width .4s;
+        display:flex; align-items:center; justify-content:flex-end; padding-right:8px;
+        color:#04201f; font-weight:700; font-size:.82rem; min-width:fit-content; }
+  .barn { width:34px; text-align:right; color:var(--muted); font-size:.85rem; }
+  .toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
+        background:var(--accent); color:#04201f; padding:11px 20px; border-radius:30px;
+        font-weight:700; opacity:0; transition:.3s; pointer-events:none; }
+  .toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h1>ROOMPULSE</h1>
+    <select id="lang" style="background:#20242d;color:var(--muted);border:1px solid var(--bar);border-radius:8px;padding:4px 7px;font-size:.8rem">
+      <option value="it">IT</option><option value="en">EN</option><option value="de">DE</option></select>
+  </div>
+  <div id="root"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s, r=document) => r.querySelector(s);
+const root = $("#root");
+
+let token = localStorage.getItem("rp_token");
+if (!token) { token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+              localStorage.setItem("rp_token", token); }
+
+const params = new URLSearchParams(location.search);
+let code = params.get("c") || localStorage.getItem("rp_code") || "";
+let lastSig = "";
+let qaSlideId = null;    // per ridisegnare la shell QA solo al cambio slide
+let groupsSlideId = null; // per assegnare il gruppo una sola volta per slide
+let getPayload = null;   // funzione che il tipo corrente espone per costruire il payload
+let qaVoted = JSON.parse(localStorage.getItem("rp_qavotes") || "{}");
+
+// i18n
+const SUPP = ["it","en","de"];
+let lang = localStorage.getItem("rp_lang") || (navigator.language||"it").slice(0,2);
+if (!SUPP.includes(lang)) lang = "it";
+let T = {};
+async function initI18n() {
+  T = (await (await fetch("/api/i18n?lang="+lang)).json()).t;
+  document.documentElement.lang = lang;
+  $("#lang").value = lang;
+}
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 1500);
+}
+
+function renderJoin() {
+  lastSig = "join";
+  root.innerHTML = `<div class="card">
+      <p class="muted">${T.join_prompt}</p>
+      <div class="codebox">
+        <input id="code" inputmode="numeric" maxlength="5" placeholder="•••••" value="${code||''}">
+        <button id="join">${T.join_btn}</button>
+      </div></div>`;
+  $("#join").onclick = () => {
+    const v = $("#code").value.trim();
+    if (v) { code = v; localStorage.setItem("rp_code", code); lastSig=""; poll(); }
+  };
+}
+
+function renderWaiting(title) {
+  lastSig = "waiting";
+  root.innerHTML = `<div class="card"><p class="muted">${T.waiting}</p>
+    <p>${title||""}</p></div>`;
+}
+
+// --- builder di input per-tipo ----------------------------------------------
+function buildInput(s) {
+  const c = s.config || {};
+  if (s.type === "mc") {
+    const multi = !!c.multi;
+    let sel = multi ? new Set() : null;
+    const optsHtml = (c.options||[]).map(o=>`<button class="opt" data-id="${o.id}">${o.label}</button>`).join("");
+    const addHtml = c.allow_other ? `<div class="codebox" style="margin-top:10px">
+        <input class="txt" id="newopt" placeholder="${T.add_option_ph}" style="flex:1">
+        <button id="addopt" type="button">${T.add_option_btn}</button></div>` : "";
+    return {html: optsHtml + addHtml, multi:false, mount(){
+      root.querySelectorAll(".opt").forEach(b=>b.onclick=()=>{
+        if (multi) {
+          b.classList.toggle("sel");
+          if (b.classList.contains("sel")) sel.add(b.dataset.id); else sel.delete(b.dataset.id);
+          sel.size>0 ? enable() : disable();
+        } else {
+          root.querySelectorAll(".opt").forEach(x=>x.classList.remove("sel"));
+          b.classList.add("sel"); sel=b.dataset.id; enable();
+        }
+      });
+      if (c.allow_other) $("#addopt").onclick = async () => {
+        const v=$("#newopt").value.trim(); if(!v) return;
+        const res=await fetch(`/api/live/${code}/add-option`, {method:"POST",
+          headers:{"Content-Type":"application/json"}, body:JSON.stringify({slide_id:s.id, label:v})});
+        if(res.ok){ toast(T.sent); lastSig=""; poll(); } else { toast("Errore"); }
+      };
+    }, get:()=> multi ? (sel.size ? {choices:[...sel]} : null) : (sel ? {choice:sel} : null)};
+  }
+  if (s.type === "scale") {
+    let sel=null; let btns="";
+    for(let v=c.min;v<=c.max;v++) btns+=`<button data-v="${v}">${v}</button>`;
+    const html=`<div class="scale">${btns}</div>
+      <div class="lbl"><span>${c.min_label||""}</span><span>${c.max_label||""}</span></div>`;
+    return {html, multi:false, mount(){
+      root.querySelectorAll(".scale button").forEach(b=>b.onclick=()=>{
+        root.querySelectorAll(".scale button").forEach(x=>x.classList.remove("sel"));
+        b.classList.add("sel"); sel={value:Number(b.dataset.v)}; enable();
+      });
+    }, get:()=>sel};
+  }
+  if (s.type === "wordcloud" || s.type === "opentext") {
+    const ml = s.type==="opentext";
+    const html = ml ? `<textarea class="txt" id="t" placeholder="${T.text_placeholder}"></textarea>`
+                    : `<input class="txt" id="t" placeholder="${T.wc_placeholder}">`;
+    return {html, multi:true, mount(){ $("#t").oninput=()=> $("#t").value.trim()?enable():disable(); },
+            get:()=>{ const v=$("#t").value.trim(); return v?{text:v}:null; }};
+  }
+  if (s.type === "argpoll") {
+    const html = `<input class="txt" id="claim" placeholder="${c.claim_label||T.claim_default}">
+      <div style="height:10px"></div>
+      <textarea class="txt" id="just" placeholder="${c.justification_label||T.just_default}"></textarea>`;
+    return {html, multi:true, mount(){
+      const chk=()=> ($("#claim").value.trim()&&$("#just").value.trim())?enable():disable();
+      $("#claim").oninput=chk; $("#just").oninput=chk;
+    }, get:()=>{ const a=$("#claim").value.trim(), b=$("#just").value.trim();
+                 return (a&&b)?{claim:a, justification:b}:null; }};
+  }
+  if (s.type === "ranking") {
+    const items = (c.items||[]);
+    const html = `<div id="rk"></div>`;
+    return {html, multi:false, mount(){
+      const cont = $("#rk");
+      cont.innerHTML = items.map(it=>`<div class="rk" data-id="${it.id}" style="touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none">
+        <span class="grip">≡</span><span class="nm">${it.label}</span></div>`).join("");
+      let drag = null;
+      cont.querySelectorAll(".rk").forEach(row => {
+        row.addEventListener("pointerdown", (e) => {
+          e.preventDefault();
+          drag = row; row.setPointerCapture(e.pointerId); row.style.opacity = ".5";
+        });
+        row.addEventListener("pointermove", (e) => {
+          if (!drag) return;
+          const after = [...cont.querySelectorAll(".rk")].find(r => {
+            if (r === drag) return false;
+            const b = r.getBoundingClientRect();
+            return e.clientY < b.top + b.height / 2;
+          });
+          if (after) cont.insertBefore(drag, after); else cont.appendChild(drag);
+        });
+        const end = () => { if (drag) { drag.style.opacity = ""; drag = null; } };
+        row.addEventListener("pointerup", end);
+        row.addEventListener("pointercancel", end);
+      });
+      enable();
+    }, get:()=>({order: [...$("#rk").querySelectorAll(".rk")].map(r=>r.dataset.id)})};
+  }
+  if (s.type === "points") {
+    const opts = c.options||[]; const total = c.total||100;
+    const html = `<div id="pts"></div><p class="muted"><span class="remaining" id="rem">${total}</span> ${T.points_left}</p>`;
+    return {html, multi:false, mount(){
+      $("#pts").innerHTML = opts.map(o=>`<div class="pt"><span class="nm">${o.label}</span>
+        <input type="number" min="0" max="${total}" value="0" data-id="${o.id}"></div>`).join("");
+      const inputs=[...$("#pts").querySelectorAll("input")];
+      const upd=()=>{ const sum=inputs.reduce((a,i)=>a+(Number(i.value)||0),0);
+        $("#rem").textContent=total-sum; (sum===total)?enable():disable(); };
+      inputs.forEach(i=>i.oninput=upd); upd();
+    }, get:()=>{ const alloc={}; $("#pts").querySelectorAll("input").forEach(i=>{
+                   const v=Number(i.value)||0; if(v) alloc[i.dataset.id]=v; }); return {alloc}; }};
+  }
+  if (s.type === "quadrant") {
+    const L=c.labels||{}; let pt=null;
+    const html = `<div class="pad" id="pad"><div class="axis h"></div><div class="axis v"></div>
+      <span class="pl t">${L.y_top||''}</span><span class="pl b">${L.y_bottom||''}</span>
+      <span class="pl l">${L.x_left||''}</span><span class="pl r">${L.x_right||''}</span></div>`;
+    return {html, multi:false, mount(){
+      const pad=$("#pad");
+      const place=(ev)=>{ const r=pad.getBoundingClientRect();
+        const cx=(ev.touches?ev.touches[0].clientX:ev.clientX)-r.left;
+        const cy=(ev.touches?ev.touches[0].clientY:ev.clientY)-r.top;
+        const x=Math.max(-1,Math.min(1, (cx/r.width)*2-1));
+        const y=Math.max(-1,Math.min(1, -((cy/r.height)*2-1)));
+        pt={x:+x.toFixed(3), y:+y.toFixed(3)};
+        let dot=pad.querySelector(".dot"); if(!dot){dot=document.createElement("div");dot.className="dot";pad.appendChild(dot);}
+        dot.style.left=(cx/r.width*100)+"%"; dot.style.top=(cy/r.height*100)+"%"; enable();
+      };
+      pad.onclick=place; pad.ontouchstart=(e)=>{e.preventDefault();place(e);};
+    }, get:()=>pt};
+  }
+  return {html:`<p class="muted">${T.unsupported_type}</p>`, multi:false, mount(){}, get:()=>null};
+}
+
+function enable(){ const b=$("#send"); if(b) b.disabled=false; }
+function disable(){ const b=$("#send"); if(b) b.disabled=true; }
+
+// --- qa: superficie con feed votabile + aggiungi domanda ---------------------
+function renderQaShell(data) {
+  const s = data.slide;
+  root.innerHTML = `<div class="card"><p class="q">${s.question}</p>
+      <input class="txt" id="qaq" placeholder="${T.qa_add_placeholder}">
+      <button class="send" id="qaadd">${T.qa_add_btn}</button>
+      <p class="muted" id="qaclosed" style="display:none;margin:10px 0 0">${T.qa_closed_banner}</p></div>
+    <div id="qafeed"></div><p class="code">${T.code_label} ${code}</p>`;
+  $("#qaadd").onclick = async () => {
+    const v = $("#qaq").value.trim(); if (!v) { toast(T.write_question); return; }
+    const res = await fetch(`/api/live/${code}/respond`, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({slide_id:s.id, token, payload:{text:v}})});
+    if (res.ok) { $("#qaq").value=""; toast(T.qa_sent); poll(); } else { toast("Errore"); }
+  };
+}
+
+function updateQaFeed(feed, accepting) {
+  const el = $("#qafeed"); if (!el || !feed) return;
+  const q=$("#qaq"), btn=$("#qaadd"), banner=$("#qaclosed");
+  if (q) q.disabled = !accepting;
+  if (btn) btn.disabled = !accepting;
+  if (banner) banner.style.display = accepting ? "none" : "block";
+  el.innerHTML = (feed.items||[]).map(it =>
+    `<div class="rk"><span class="nm">${it.text}</span>
+       <button class="qv ${qaVoted[it.id]?'sel':''}" data-id="${it.id}" ${accepting?'':'disabled'}>▲ ${it.votes}</button></div>`
+  ).join("") || `<p class="muted">${T.qa_empty}</p>`;
+  if (accepting) el.querySelectorAll(".qv").forEach(b => b.onclick = async () => {
+    const res = await fetch(`/api/live/${code}/upvote`, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({response_id:b.dataset.id, token})});
+    if (res.ok) { const d = await res.json();
+      if (d.voted) qaVoted[b.dataset.id]=1; else delete qaVoted[b.dataset.id];
+      localStorage.setItem("rp_qavotes", JSON.stringify(qaVoted)); poll(); }
+  });
+}
+
+async function renderGroup(data) {
+  const s = data.slide;
+  root.innerHTML = `<div class="card"><p class="q">${s.question}</p>
+    <p class="muted" id="grp">…</p></div><p class="code">${T.code_label} ${code}</p>`;
+  try {
+    const res = await fetch(`/api/live/${code}/assign`, {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({slide_id:s.id, token})});
+    if (res.ok) {
+      const g = await res.json();
+      root.innerHTML = `<div class="card"><p class="q">${s.question}</p>
+        <p class="muted">${T.your_group}</p>
+        <div style="font-size:2.6rem;font-weight:800;color:var(--accent);margin-top:6px">${g.group_name}</div></div>
+        <p class="code">${T.code_label} ${code}</p>`;
+    } else {
+      const e = await res.json(); const el = $("#grp"); if (el) el.textContent = e.detail || "—";
+      groupsSlideId = null;  // ritenta al prossimo poll (es. run non ancora pronto)
+    }
+  } catch { groupsSlideId = null; }
+}
+
+function renderSlide(data) {
+  const s = data.slide;
+  const inp = buildInput(s);
+  getPayload = inp.get;
+  root.innerHTML = `<div class="card"><p class="q">${s.question}</p>${inp.html}
+      <button class="send" id="send" disabled>${T.send}</button></div>
+    <p class="code">${T.code_label} ${code}</p>`;
+  inp.mount();
+  $("#send").onclick = () => submit(s.id, inp.multi);
+}
+
+function renderResults(data) {
+  const r = data.results || {};
+  let body = "";
+  if (data.pair) {
+    body = renderComparison(r, data.pair);
+  } else if (r.type === "mc") {
+    const max=Math.max(1,...r.options.map(o=>o.count));
+    const correct=r.correct||[];
+    body=r.options.map(o=>bar(o.label,o.count,max,correct.includes(o.id))).join("");
+  } else if (r.type === "scale") {
+    const max=Math.max(1,...r.histogram.map(h=>h.count));
+    body=r.histogram.map(h=>bar(String(h.value),h.count,max)).join("");
+    body+=`<p class="muted">${T.mean} ${r.mean?r.mean.toFixed(2):"–"} · ${r.n} ${T.votes}</p>`;
+  } else if (r.type === "points") {
+    const max=Math.max(1,...r.options.map(o=>o.total));
+    body=r.options.map(o=>bar(o.label,o.total,max)).join("");
+  } else if (r.type === "ranking") {
+    body=r.items.map((it,i)=>`<div class="barrow"><span class="name">${i+1}. ${it.label}</span>
+      <span class="barn">${it.mean_rank?it.mean_rank.toFixed(2):"–"}</span></div>`).join("");
+  } else if (r.type === "quadrant") {
+    const L=r.labels||{};
+    const dots=(r.points||[]).map(p=>{const l=(p.x+1)/2*100, t=(1-(p.y+1)/2)*100;
+      return `<div class="dot" style="left:${l}%;top:${t}%;width:13px;height:13px;box-shadow:none;opacity:.75"></div>`;}).join("");
+    body=`<div class="pad"><div class="axis h"></div><div class="axis v"></div>
+      <span class="pl t">${L.y_top||''}</span><span class="pl b">${L.y_bottom||''}</span>
+      <span class="pl l">${L.x_left||''}</span><span class="pl r">${L.x_right||''}</span>${dots}</div>`;
+  } else if (r.type === "wordcloud") {
+    body=r.terms.map(t=>`<span style="font-size:${1+Math.min(2,t.count*0.4)}rem;margin:0 8px">${t.term} <span style="font-size:.65rem;color:var(--muted)">(${t.count})</span></span>`).join("");
+  } else if (r.type === "opentext" && r.clustered) {
+    body=r.clusters.flatMap(c=>c.items.map(t=>
+      `<div class="rk"><div><span>${t}</span> <span class="atag">${c.label}</span></div></div>`
+    )).join("") || `<p class="muted">${T.no_answers}</p>`;
+  } else if (r.type === "argpoll" && r.clustered) {
+    body=r.claim_clusters.flatMap(c=>c.items.map(it=>
+      `<div class="rk"><div><b>${it.claim}</b> <span class="ctag">${c.label}</span><br>
+        <span class="muted">${it.justification}</span> ${it.arg_label?`<span class="atag">${it.arg_label}</span>`:""}</div></div>`
+    )).join("") || `<p class="muted">${T.no_answers}</p>`;
+  } else if (r.type === "opentext" || r.type === "argpoll") {
+    body=(r.items||[]).map(it=>`<div class="rk">${r.type==="argpoll"
+      ?`<div><b>${it.claim}</b><br><span class="muted">${it.justification}</span></div>`
+      :`<div>${it.text}</div>`}</div>`).join("") || `<p class="muted">${T.no_answers}</p>`;
+  } else { body = `<p class="muted">${r.n||0} risposte.</p>`; }
+  root.innerHTML = `<div class="card"><p class="q">${data.slide.question}</p>${body}</div>
+    <p class="code">${T.code_label} ${code}</p>`;
+}
+
+function renderComparison(post, pair) {
+  const pre = pair.results;
+  let body = `<p class="meta">${T.compare_prepost}</p>`;
+  if (post.type==="scale" && pre.type==="scale") {
+    const d = (post.mean!=null && pre.mean!=null) ? (post.mean-pre.mean) : null;
+    const col = d>=0 ? "#3fb950" : "var(--danger)";
+    return body + `<div style="display:flex;gap:26px;align-items:center;margin:20px 0;flex-wrap:wrap">
+      <div><div class="meta">PRE</div><div class="big">${pre.mean!=null?pre.mean.toFixed(2):"–"}</div></div>
+      <div class="big" style="color:var(--accent)">→</div>
+      <div><div class="meta">POST</div><div class="big">${post.mean!=null?post.mean.toFixed(2):"–"}</div></div>
+      <div><div class="meta">${T.shift_word}</div>
+        <div class="big" style="color:${col}">${d!=null?(d>0?"+":"")+d.toFixed(2):"–"}</div></div>
+    </div><p class="meta">${pre.n} ${T.votes} (PRE) · ${post.n} ${T.votes} (POST)</p>`;
+  }
+  if (post.type==="mc" && pre.type==="mc") {
+    const preMap=Object.fromEntries(pre.options.map(o=>[o.id,o.count]));
+    const max=Math.max(1,...post.options.map(o=>Math.max(o.count, preMap[o.id]||0)));
+    return body + post.options.map(o=>{
+      const pc=preMap[o.id]||0, d=o.count-pc;
+      const dcol = d>0?"#3fb950":(d<0?"var(--danger)":"var(--muted)");
+      return `<div style="margin:14px 0"><div style="margin-bottom:4px">${o.label}
+        <span style="color:${dcol};font-weight:700">(${d>0?"+":""}${d})</span></div>
+        <div class="barrow"><span class="name" style="width:46px;color:var(--muted)">pre</span>
+          <span class="bartrack"><span class="barfill" style="width:${Math.round(pc/max*100)}%;background:#4a5568">${pc||""}</span></span></div>
+        <div class="barrow"><span class="name" style="width:46px">post</span>
+          <span class="bartrack"><span class="barfill" style="width:${Math.round(o.count/max*100)}%">${o.count||""}</span></span></div></div>`;
+    }).join("");
+  }
+  if (post.type==="quadrant" && pre.type==="quadrant") {
+    const L=post.labels||{};
+    const toXY=(p)=>({l:(p.x+1)/2*100, t:(1-(p.y+1)/2)*100});
+    const cen=(pts)=> pts.length ? {x:pts.reduce((a,p)=>a+p.x,0)/pts.length, y:pts.reduce((a,p)=>a+p.y,0)/pts.length} : null;
+    const cPre=cen(pre.points||[]), cPost=cen(post.points||[]);
+    const dotsPre=(pre.points||[]).map(p=>{const c=toXY(p);return `<div class="dot" style="left:${c.l}%;top:${c.t}%;width:10px;height:10px;background:#4a5568;box-shadow:none;opacity:.55"></div>`;}).join("");
+    const dotsPost=(post.points||[]).map(p=>{const c=toXY(p);return `<div class="dot" style="left:${c.l}%;top:${c.t}%;width:10px;height:10px;box-shadow:none;opacity:.6"></div>`;}).join("");
+    let arrow="", deltas="–";
+    if (cPre && cPost) {
+      const a=toXY(cPre), b=toXY(cPost);
+      arrow=`<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none">
+        <defs><marker id="ah" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--accent)"/></marker></defs>
+        <line x1="${a.l}" y1="${a.t}" x2="${b.l}" y2="${b.t}" stroke="var(--accent)" stroke-width="0.9" marker-end="url(#ah)"/></svg>
+        <div class="dot" style="left:${a.l}%;top:${a.t}%;width:18px;height:18px;background:#4a5568;border:2px solid #fff;box-shadow:none"></div>
+        <div class="dot" style="left:${b.l}%;top:${b.t}%;width:18px;height:18px;border:2px solid #fff;box-shadow:none"></div>`;
+      const dx=cPost.x-cPre.x, dy=cPost.y-cPre.y;
+      deltas=`Δx ${dx>0?"+":""}${dx.toFixed(2)} · Δy ${dy>0?"+":""}${dy.toFixed(2)}`;
+    }
+    return body + `<div class="pad">${dotsPre}${dotsPost}<div class="axis h"></div><div class="axis v"></div>
+      <span class="pl t">${L.y_top||''}</span><span class="pl b">${L.y_bottom||''}</span>
+      <span class="pl l">${L.x_left||''}</span><span class="pl r">${L.x_right||''}</span>${arrow}</div>
+      <p class="meta">${T.shift_word}: <b style="color:var(--accent)">${deltas}</b> · ${pre.n} (PRE) · ${post.n} (POST)</p>`;
+  }
+  return body;
+}
+
+function bar(name, count, max, correct) {
+  const pct = count>0 ? Math.max(10, Math.round(count/max*100)) : 0;
+  const fill = correct ? "#3fb950" : "var(--accent)";
+  return `<div class="barrow"><span class="name"${correct?' style="color:#3fb950"':''}>${correct?"✓ ":""}${name}</span>
+    <span class="bartrack"><span class="barfill" style="width:${pct}%;background:${fill}">${count||""}</span></span></div>`;
+}
+
+async function submit(slideId, multi) {
+  const payload = getPayload ? getPayload() : null;
+  if (!payload) { toast(T.complete_answer); return; }
+  try {
+    const res = await fetch(`/api/live/${code}/respond`, {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({slide_id:slideId, token, payload})});
+    if (res.ok) {
+      const data = await res.json();
+      if (data.quiz) { showQuizResult(data.quiz); return; }   // quiz: esito + lock
+      toast(T.sent);
+      if (multi) { lastSig=""; }   // multi: ridisegna form pulito per un nuovo invio
+      else { $("#send").textContent=T.sent; disable(); }
+    } else { const e=await res.json(); toast(e.detail||"Errore"); }
+  } catch { toast(T.offline); }
+}
+
+function showQuizResult(q) {
+  root.querySelectorAll(".opt").forEach(b => {
+    b.style.pointerEvents = "none";
+    if (q.correct_ids.includes(b.dataset.id)) b.classList.add("correct");
+    else if (b.classList.contains("sel")) b.classList.add("wrong");
+  });
+  const s = $("#send");
+  s.textContent = q.correct ? T.quiz_correct : T.quiz_wrong;
+  s.style.background = q.correct ? "#3fb950" : "var(--danger)";
+  s.style.color = "#fff";
+  disable();
+}
+
+async function poll() {
+  if (!code) { if (lastSig!=="join") renderJoin(); return; }
+  try {
+    const res = await fetch(`/api/live/${code}`);
+    if (res.status === 404) { code=""; localStorage.removeItem("rp_code"); renderJoin(); return; }
+    const data = await res.json();
+    if (data.status === "waiting") { if (lastSig!=="waiting") renderWaiting(data.title); return; }
+    const sig = `${data.slide.id}:${data.state}`;
+    if (data.slide.type === "qa") {        // qa: shell solo al cambio slide, feed+stato ad ogni poll
+      if (data.slide.id !== qaSlideId) { qaSlideId = data.slide.id; renderQaShell(data); }
+      updateQaFeed(data.feed, data.state === "open");
+      return;
+    }
+    qaSlideId = null;
+    if (data.slide.type === "groups") {    // randomizzatore: assegna una volta sola
+      if (data.slide.id !== groupsSlideId) { groupsSlideId = data.slide.id; renderGroup(data); }
+      return;
+    }
+    groupsSlideId = null;
+    if (sig === lastSig) return;
+    lastSig = sig;
+    if (data.state === "revealed") renderResults(data);
+    else renderSlide(data);
+  } catch {}
+}
+
+$("#lang").onchange = () => { localStorage.setItem("rp_lang", $("#lang").value); location.reload(); };
+
+initI18n().then(() => {
+  renderJoin();
+  poll();
+  setInterval(poll, 1500);
+});
+</script>
+</body>
+</html>

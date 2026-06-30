@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoomPulse — presenter</title>
+<link rel="icon" href="/static/imgs/favicon.png">
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --fg:#e8eaed; --muted:#9aa0ab;
+          --accent:#16a3ab; --bar:#2a2e38; --ok:#3fb950; --danger:#d9554f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif;
+         background:var(--bg); color:var(--fg); }
+  .grid { display:grid; grid-template-columns:280px 1fr; min-height:100vh; }
+  .side { background:#14171d; padding:18px; border-right:1px solid var(--bar); }
+  .main { padding:32px 40px; }
+  h1 { font-size:.8rem; color:var(--muted); letter-spacing:.1em; margin:0 0 14px; }
+  a.editlink { color:var(--accent); font-size:.8rem; }
+  .join { text-align:center; background:var(--card); border-radius:12px; padding:14px; margin:10px 0 16px; }
+  .join .num { font-size:2rem; font-weight:800; letter-spacing:.18em; }
+  .join img { width:130px; height:130px; background:#fff; border-radius:8px; padding:6px; margin-top:8px; }
+  .slidelist { list-style:none; padding:0; margin:0; }
+  .slidelist li { padding:11px 12px; border-radius:9px; margin:6px 0; background:#1c2027;
+        cursor:pointer; font-size:.9rem; border:1px solid transparent; }
+  .slidelist li:hover { border-color:var(--bar); }
+  .slidelist li.active { border-color:var(--accent); background:#13343a; }
+  .slidelist .t { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
+  .badge { float:right; font-size:.68rem; padding:2px 7px; border-radius:20px; background:var(--bar); color:var(--muted); }
+  .badge.open { background:#13343a; color:var(--accent); }
+  .badge.revealed { background:#1d2e1d; color:var(--ok); }
+  .q { font-size:2rem; font-weight:700; line-height:1.25; margin:0 0 8px; }
+  .meta { color:var(--muted); margin-bottom:22px; }
+  .controls { display:flex; gap:10px; margin:18px 0 30px; flex-wrap:wrap; }
+  .controls button { padding:11px 18px; border-radius:10px; font-weight:700; cursor:pointer;
+        background:var(--card); color:var(--fg); border:1px solid var(--bar); }
+  .controls button.primary { background:var(--accent); color:#04201f; border:0; }
+  .layout { display:grid; grid-template-columns:1fr; gap:24px; }
+  .layout.mod { grid-template-columns:1fr 320px; }
+  .barrow { display:flex; align-items:center; gap:14px; margin:14px 0; }
+  .barrow .name { width:34%; font-size:1.05rem; }
+  .bartrack { flex:1; background:var(--bar); border-radius:8px; height:36px; overflow:hidden; }
+  .barfill { height:100%; background:var(--accent); border-radius:8px; transition:width .5s;
+        display:flex; align-items:center; justify-content:flex-end; padding-right:10px;
+        color:#04201f; font-weight:800; }
+  .big { font-size:2.6rem; font-weight:800; }
+  .cloud span { display:inline-block; margin:6px 12px; line-height:1; }
+  .pad { position:relative; width:460px; max-width:80vw; aspect-ratio:1; background:#181b22;
+        border:1px solid var(--bar); border-radius:12px; }
+  .pad .axis { position:absolute; background:var(--bar); }
+  .pad .axis.h { left:0; right:0; top:50%; height:1px; } .pad .axis.v { top:0; bottom:0; left:50%; width:1px; }
+  .pad .dot { position:absolute; width:14px; height:14px; border-radius:50%; background:var(--accent);
+        transform:translate(-50%,-50%); opacity:.75; }
+  .pad .pl { position:absolute; color:var(--muted); font-size:.78rem; }
+  .pl.t{top:6px;left:50%;transform:translateX(-50%)} .pl.b{bottom:6px;left:50%;transform:translateX(-50%)}
+  .pl.l{left:6px;top:50%;transform:translateY(-50%)} .pl.r{right:6px;top:50%;transform:translateY(-50%)}
+  .feed .item { background:var(--card); border-radius:11px; padding:13px 15px; margin:9px 0; font-size:1.1rem; }
+  .feed .item .just { color:var(--muted); font-size:.95rem; margin-top:3px; }
+  .ccluster { background:var(--card); border-radius:11px; padding:14px 16px; margin:12px 0; }
+  .cchead { font-size:1.3rem; font-weight:700; margin-bottom:8px; }
+  .cchead .ccount { color:var(--accent); }
+  .cjust { color:var(--muted); padding:6px 0; border-top:1px solid #20242d;
+        display:flex; justify-content:space-between; gap:14px; align-items:baseline; }
+  .cjust .atag { background:#13343a; color:var(--accent); border-radius:20px;
+        padding:2px 11px; font-size:.72rem; white-space:nowrap; }
+  .mtitle { font-size:.8rem; color:var(--muted); margin-top:28px; letter-spacing:.08em; text-transform:uppercase; }
+  .cmatrix { border-collapse:collapse; margin-top:10px; }
+  .cmatrix th, .cmatrix td { border:1px solid var(--bar); padding:7px 12px; text-align:center; font-size:.85rem; }
+  .cmatrix th { color:var(--muted); font-weight:600; }
+  .cmatrix th:first-child, .cmatrix td:first-child { text-align:left; }
+  .modbox { background:#14171d; border:1px solid var(--bar); border-radius:12px; padding:14px; }
+  .modbox h3 { margin:0 0 10px; font-size:.8rem; color:var(--muted); letter-spacing:.08em; }
+  .moditem { display:flex; gap:8px; align-items:flex-start; padding:9px 0; border-bottom:1px solid #20242d; }
+  .moditem .txt { flex:1; font-size:.9rem; }
+  .moditem.hidden .txt { opacity:.4; text-decoration:line-through; }
+  .moditem button { padding:4px 9px; font-size:.78rem; border-radius:7px; border:1px solid var(--bar);
+        background:#181b22; color:var(--fg); cursor:pointer; }
+  .empty { color:var(--muted); margin-top:40px; }
+</style>
+</head>
+<body>
+<div class="grid">
+  <aside class="side">
+    <h1>ROOMPULSE <select id="lang" style="float:right;background:#20242d;color:var(--muted);border:1px solid var(--bar);border-radius:8px;padding:2px 5px;font-size:.75rem">
+      <option value="it">IT</option><option value="en">EN</option><option value="de">DE</option></select></h1>
+    <a class="editlink" id="editlink" href="/edit" target="_blank">⚙ editor</a>
+    <a class="editlink" id="logout" href="#" style="float:right">esci</a>
+    <div class="join" id="join"></div>
+    <ul class="slidelist" id="slides"></ul>
+  </aside>
+  <main class="main" id="main"><p class="empty">…</p></main>
+</div>
+
+<script>
+const $ = (s,r=document)=>r.querySelector(s);
+const params = new URLSearchParams(location.search);
+const pid = params.get("p");
+let state = null;
+
+// i18n
+const SUPP = ["it","en","de"];
+let lang = localStorage.getItem("rp_lang") || (navigator.language||"it").slice(0,2);
+if (!SUPP.includes(lang)) lang = "it";
+let T = {};
+async function initI18n() {
+  T = (await (await fetch("/api/i18n?lang="+lang)).json()).t;
+  document.documentElement.lang = lang;
+  $("#lang").value = lang;
+  $("#logout").textContent = T.logout;
+  $("#main").innerHTML = `<p class="empty">${T.loading}</p>`;
+}
+
+async function load() {
+  if (!pid) { $("#main").innerHTML = `<p class='empty'>${T.missing_pid}</p>`; return; }
+  try {
+    const res = await fetch(`/api/presentations/${pid}`);
+    if (res.status === 401) { location.href = "/login?next=" + encodeURIComponent(location.pathname+location.search); return; }
+    if (!res.ok) { $("#main").innerHTML = `<p class='empty'>${T.not_found}</p>`; return; }
+    state = await res.json(); render();
+  } catch {}
+}
+
+function render() {
+  $("#join").innerHTML = `<div class="num">${state.join_code}</div>
+     <img src="/qr/${state.join_code}.svg" alt="QR">`;
+  const run = state.run;
+  const activeId = run ? run.active_slide_id : null;
+  const states = run ? run.states : {};
+  $("#slides").innerHTML = state.slides.map(s => {
+    const st = states[s.id] || "pending";
+    return `<li class="${s.id===activeId?'active':''}" data-id="${s.id}">
+      <span class="t">${s.type}</span><span class="badge ${st}">${st}</span>
+      <div>${s.question}</div></li>`;
+  }).join("");
+  $("#slides").querySelectorAll("li").forEach(li => li.onclick = () => activate(li.dataset.id));
+
+  if (!run) { $("#main").innerHTML = `<p class="empty">${T.no_run}</p>
+    <div class="controls"><button class="primary" id="newrun">${T.start_run}</button></div>`;
+    $("#newrun").onclick = newRun; return; }
+  if (!activeId) { $("#main").innerHTML = `<p class='empty'>${T.click_slide}</p>`; return; }
+  const slide = state.slides.find(s => s.id === activeId);
+  renderMain(slide, states[activeId]||"open", run.results, run.moderation, run.pair);
+}
+
+function renderMain(slide, st, results, moderation, pair) {
+  const hasMod = moderation != null;
+  const isQa = slide.type === "qa";
+  const controls = isQa
+    ? `<button class="primary" id="qatoggle">${st==="open"?T.close_questions:T.reopen_questions}</button>
+       <button id="newrun">${T.new_run}</button>`
+    : `<button class="primary" id="reveal">${st==="revealed"?T.hide_results:T.show_results}</button>
+       <button id="open">${T.reopen_vote}</button>
+       ${(slide.type==="argpoll"||slide.type==="opentext") ? `<button id="clusterbtn">${T.cluster_now}</button>` : ""}
+       <button id="newrun">${T.new_run}</button>`;
+  $("#main").innerHTML = `
+    <p class="q">${slide.question}</p>
+    <p class="meta">${(results&&results.n)||0} ${T.responses_word} · ${T.state_word}: <b>${st}</b></p>
+    <div class="controls">${controls}</div>
+    <div class="layout ${hasMod?'mod':''}">
+      <div id="res"></div>
+      ${hasMod?'<div id="mod"></div>':''}
+    </div>`;
+  if (isQa) {
+    $("#qatoggle").onclick = () => setState(slide.id, st==="open"?"closed":"open");
+  } else {
+    $("#reveal").onclick = () => setState(slide.id, st==="revealed"?"open":"revealed");
+    $("#open").onclick   = () => setState(slide.id, "open");
+  }
+  $("#newrun").onclick = newRun;
+  if (slide.type === "argpoll" || slide.type === "opentext") {
+    const cb = $("#clusterbtn");
+    cb.onclick = async () => {
+      cb.disabled = true; cb.textContent = T.clustering_wait;
+      const res = await fetch(`/api/runs/${state.run.id}/cluster`, {method:"POST",
+        headers:{"Content-Type":"application/json"}, body:JSON.stringify({slide_id:slide.id})});
+      if (res.ok) { load(); }
+      else { const e = await res.json(); alert(e.detail || "Errore");
+        cb.disabled = false; cb.textContent = T.cluster_now; }
+    };
+  }
+  $("#res").innerHTML = pair ? renderComparison(results, pair, slide) : renderResults(results);
+  if (hasMod) renderModeration(moderation);
+}
+
+function renderResults(r) {
+  if (!r) return "";
+  if (r.type === "mc") {
+    const max=Math.max(1,...r.options.map(o=>o.count));
+    const correct=r.correct||[];
+    return r.options.map(o=>bar(o.label,o.count,max,correct.includes(o.id))).join("");
+  }
+  if (r.type === "scale") {
+    const max=Math.max(1,...r.histogram.map(h=>h.count));
+    return r.histogram.map(h=>bar(String(h.value),h.count,max)).join("")
+      +`<p class="meta">${T.mean} <span class="big">${r.mean?r.mean.toFixed(2):"–"}</span> · ${r.n} ${T.votes}</p>`;
+  }
+  if (r.type === "points") {
+    const max=Math.max(1,...r.options.map(o=>o.total));
+    return r.options.map(o=>bar(o.label,o.total,max)).join("");
+  }
+  if (r.type === "ranking") {
+    return r.items.map((it,i)=>`<div class="barrow"><span class="name">${i+1}. ${it.label}</span>
+      <span class="bartrack"></span><span class="big" style="font-size:1.4rem">${it.mean_rank?it.mean_rank.toFixed(2):"–"}</span></div>`).join("");
+  }
+  if (r.type === "wordcloud") {
+    if (!r.terms.length) return `<p class="meta">${T.waiting_responses}</p>`;
+    const max=Math.max(...r.terms.map(t=>t.count));
+    return `<div class="cloud">`+r.terms.map(t=>{
+      const sz=1+ (t.count/max)*2.6;
+      return `<span style="font-size:${sz.toFixed(2)}rem">${t.term}<span style="font-size:.5em;color:var(--muted)"> (${t.count})</span></span>`;}).join("")+`</div>`;
+  }
+  if (r.type === "quadrant") {
+    const L=r.labels||{};
+    const dots=r.points.map(p=>{const l=(p.x+1)/2*100, t=(1-(p.y+1)/2)*100;
+      return `<div class="dot" style="left:${l}%;top:${t}%"></div>`;}).join("");
+    return `<div class="pad"><div class="axis h"></div><div class="axis v"></div>
+      <span class="pl t">${L.y_top||''}</span><span class="pl b">${L.y_bottom||''}</span>
+      <span class="pl l">${L.x_left||''}</span><span class="pl r">${L.x_right||''}</span>${dots}</div>`;
+  }
+  if (r.type === "opentext" && r.clustered) {
+    const max = Math.max(1, ...r.clusters.map(c=>c.count));
+    const bars = r.clusters.map(c=>bar(c.label, c.count, max)).join("");
+    const nested = r.clusters.map(c => `<div class="ccluster"><div class="cchead">${c.label} <span class="ccount">${c.count}</span></div>
+      ${c.items.map(t=>`<div class="cjust"><span>${t}</span></div>`).join("")}</div>`).join("");
+    return bars + nested;
+  }
+  if (r.type === "argpoll" && r.clustered) {
+    const nested = r.claim_clusters.map(c => `
+      <div class="ccluster"><div class="cchead">${c.label} <span class="ccount">${c.count}</span></div>
+        ${c.items.map(it => `<div class="cjust"><span>${it.justification}</span>${it.arg_label?`<span class="atag">${it.arg_label}</span>`:""}</div>`).join("")}
+      </div>`).join("");
+    return nested + matrixHtml(r);
+  }
+  if (r.type === "opentext" || r.type === "argpoll") {
+    if (!r.items.length) return `<p class="meta">${T.waiting_responses}</p>`;
+    return `<div class="feed">`+r.items.map(it=> r.type==="argpoll"
+      ? `<div class="item"><b>${it.claim}</b><div class="just">${it.justification}</div></div>`
+      : `<div class="item">${it.text}</div>`).join("")+`</div>`;
+  }
+  if (r.type === "qa") {
+    if (!r.items.length) return `<p class="meta">${T.waiting_questions}</p>`;
+    return `<div class="feed">`+r.items.map(it=>`<div class="item"
+      style="display:flex;justify-content:space-between;gap:14px;align-items:center">
+      <span>${it.text}</span><b style="color:var(--accent);white-space:nowrap">▲ ${it.votes}</b></div>`).join("")+`</div>`;
+  }
+  if (r.type === "groups") {
+    const max=Math.max(1,...r.groups.map(g=>g.count));
+    return r.groups.map(g=>bar(g.name, g.count, max)).join("")
+      + `<p class="meta">${r.n} ${T.responses_word}</p>`;
+  }
+  return `<p class="meta">${r.n||0} ${T.responses_word}</p>`;
+}
+
+function renderComparison(post, pair, slide) {
+  const pre = pair.results;
+  let body = `<p class="meta">${T.compare_prepost}</p>`;
+  if (post.type==="scale" && pre.type==="scale") {
+    const d = (post.mean!=null && pre.mean!=null) ? (post.mean-pre.mean) : null;
+    const col = d>=0 ? "var(--ok)" : "var(--danger)";
+    return body + `<div style="display:flex;gap:40px;align-items:center;margin:24px 0">
+      <div><div class="meta">PRE</div><div class="big">${pre.mean!=null?pre.mean.toFixed(2):"–"}</div></div>
+      <div class="big" style="color:var(--accent)">→</div>
+      <div><div class="meta">POST</div><div class="big">${post.mean!=null?post.mean.toFixed(2):"–"}</div></div>
+      <div><div class="meta">${T.shift_word}</div>
+        <div class="big" style="color:${col}">${d!=null?(d>0?"+":"")+d.toFixed(2):"–"}</div></div>
+    </div><p class="meta">${pre.n} ${T.votes} (PRE) · ${post.n} ${T.votes} (POST)</p>`;
+  }
+  if (post.type==="mc" && pre.type==="mc") {
+    const preMap=Object.fromEntries(pre.options.map(o=>[o.id,o.count]));
+    const max=Math.max(1,...post.options.map(o=>Math.max(o.count, preMap[o.id]||0)));
+    return body + post.options.map(o=>{
+      const pc=preMap[o.id]||0, d=o.count-pc;
+      const dcol = d>0?"var(--ok)":(d<0?"var(--danger)":"var(--muted)");
+      return `<div style="margin:16px 0"><div style="margin-bottom:4px">${o.label}
+        <span style="color:${dcol};font-weight:700">(${d>0?"+":""}${d})</span></div>
+        <div class="barrow"><span class="name" style="width:54px;color:var(--muted)">pre</span>
+          <span class="bartrack"><span class="barfill" style="width:${Math.round(pc/max*100)}%;background:#4a5568">${pc||""}</span></span></div>
+        <div class="barrow"><span class="name" style="width:54px">post</span>
+          <span class="bartrack"><span class="barfill" style="width:${Math.round(o.count/max*100)}%">${o.count||""}</span></span></div></div>`;
+    }).join("");
+  }
+  if (post.type==="quadrant" && pre.type==="quadrant") {
+    const L=post.labels||{};
+    const toXY=(p)=>({l:(p.x+1)/2*100, t:(1-(p.y+1)/2)*100});
+    const cen=(pts)=> pts.length ? {x:pts.reduce((a,p)=>a+p.x,0)/pts.length, y:pts.reduce((a,p)=>a+p.y,0)/pts.length} : null;
+    const cPre=cen(pre.points||[]), cPost=cen(post.points||[]);
+    const dotsPre=(pre.points||[]).map(p=>{const c=toXY(p);return `<div class="dot" style="left:${c.l}%;top:${c.t}%;width:10px;height:10px;background:#4a5568;box-shadow:none;opacity:.55"></div>`;}).join("");
+    const dotsPost=(post.points||[]).map(p=>{const c=toXY(p);return `<div class="dot" style="left:${c.l}%;top:${c.t}%;width:10px;height:10px;box-shadow:none;opacity:.6"></div>`;}).join("");
+    let arrow="", deltas="–";
+    if (cPre && cPost) {
+      const a=toXY(cPre), b=toXY(cPost);
+      arrow=`<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none">
+        <defs><marker id="ah" markerWidth="5" markerHeight="5" refX="4" refY="2.5" orient="auto"><path d="M0,0 L5,2.5 L0,5 Z" fill="var(--accent)"/></marker></defs>
+        <line x1="${a.l}" y1="${a.t}" x2="${b.l}" y2="${b.t}" stroke="var(--accent)" stroke-width="0.9" marker-end="url(#ah)"/></svg>
+        <div class="dot" style="left:${a.l}%;top:${a.t}%;width:18px;height:18px;background:#4a5568;border:2px solid #fff;box-shadow:none"></div>
+        <div class="dot" style="left:${b.l}%;top:${b.t}%;width:18px;height:18px;border:2px solid #fff;box-shadow:none"></div>`;
+      const dx=cPost.x-cPre.x, dy=cPost.y-cPre.y;
+      deltas=`Δx ${dx>0?"+":""}${dx.toFixed(2)} · Δy ${dy>0?"+":""}${dy.toFixed(2)}`;
+    }
+    return body + `<div class="pad">${dotsPre}${dotsPost}<div class="axis h"></div><div class="axis v"></div>
+      <span class="pl t">${L.y_top||''}</span><span class="pl b">${L.y_bottom||''}</span>
+      <span class="pl l">${L.x_left||''}</span><span class="pl r">${L.x_right||''}</span>${arrow}</div>
+      <p class="meta">${T.shift_word} baricentro: <b style="color:var(--accent)">${deltas}</b> · ${pre.n} (PRE) · ${post.n} (POST)</p>`;
+  }
+  return body + `<div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div><div class="meta">PRE</div>${renderResults(pre)}</div>
+    <div><div class="meta">POST</div>${renderResults(post)}</div></div>`;
+}
+
+function renderModeration(items) {
+  $("#mod").innerHTML = `<div class="modbox"><h3>${T.moderation_word} (${items.length})</h3>
+    ${items.length? items.map(it=>`
+      <div class="moditem ${it.status==='hidden'?'hidden':''}">
+        <div class="txt">${it.text}${it.justification?`<br><span style="color:var(--muted)">${it.justification}</span>`:''}</div>
+        <button data-id="${it.id}" data-to="${it.status==='hidden'?'visible':'hidden'}">
+          ${it.status==='hidden'?T.mod_show:T.mod_hide}</button>
+      </div>`).join("") : `<p class="meta">${T.no_answers}</p>`}</div>`;
+  $("#mod").querySelectorAll("button[data-id]").forEach(b=>b.onclick=async()=>{
+    await fetch(`/api/responses/${b.dataset.id}/status`, {method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify({status:b.dataset.to})});
+    load();
+  });
+}
+
+function matrixHtml(r) {
+  if (!r.matrix_cols || !r.matrix_cols.length) return "";
+  const head = `<tr><th></th>${r.matrix_cols.map(c=>`<th>${c}</th>`).join("")}</tr>`;
+  const max = Math.max(1, ...r.matrix.flat());
+  const body = r.matrix.map((row,i)=>`<tr><th>${r.matrix_rows[i]}</th>${
+    row.map(v=>`<td style="background:rgba(22,163,171,${v?(0.15+0.55*v/max).toFixed(2):0})">${v||""}</td>`).join("")}</tr>`).join("");
+  return `<h3 class="mtitle">${T.matrix_title}</h3><table class="cmatrix">${head}${body}</table>`;
+}
+
+function bar(name, count, max, correct) {
+  const pct=Math.round(count/max*100);
+  const fill = correct ? "#3fb950" : "var(--accent)";
+  return `<div class="barrow"><span class="name"${correct?' style="color:#3fb950"':''}>${correct?"✓ ":""}${name}</span>
+    <span class="bartrack"><span class="barfill" style="width:${pct}%;background:${fill}">${count||""}</span></span></div>`;
+}
+
+async function activate(slideId) {
+  if (!state.run) await newRun();
+  await fetch(`/api/runs/${state.run.id}/activate`, {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify({slide_id:slideId})});
+  load();
+}
+async function setState(slideId, st) {
+  await fetch(`/api/runs/${state.run.id}/state`, {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify({slide_id:slideId, state:st})});
+  load();
+}
+async function newRun() {
+  await fetch(`/api/presentations/${pid}/runs`, {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:JSON.stringify({label:null})});
+  await load();
+}
+
+document.getElementById("logout").onclick = async (e) => { e.preventDefault();
+  await fetch("/api/logout", {method:"POST"}); location.href = "/login"; };
+$("#lang").onchange = () => { localStorage.setItem("rp_lang", $("#lang").value); location.reload(); };
+
+initI18n().then(() => {
+  load();
+  setInterval(load, 1500);
+});
+</script>
+</body>
+</html>

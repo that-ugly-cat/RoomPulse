@@ -1,0 +1,10 @@
+# RoomPulse
+.venv/
+__pycache__/
+*.pyc
+*.db
+*.sqlite
+*.sqlite3
+.env
+.DS_Store
+# uv.lock È committato (deploy riproducibili)
