@@ -98,11 +98,3 @@ at `RP_DB`. Back up by copying it:
 cp /var/lib/docker/volumes/roompulse_data/_data/roompulse.db backup-$(date +%F).db
 ```
 
-## 6. Pre-flight checklist
-
-- [ ] `JWT_SECRET` set to a long random value
-- [ ] demo user (`spit@local`) removed or its password changed
-- [ ] real presenter account(s) created
-- [ ] HTTPS in front, public hostname resolves
-- [ ] DB on a persistent volume, backups scheduled
-- [ ] (optional) each presenter has added their Anthropic API key in ⚙ for clustering
