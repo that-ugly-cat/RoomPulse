@@ -10,7 +10,7 @@
 ---
 
 RoomPulse is a self-hosted live polling tool, built for keynotes and
-teaching — with a focus on **argumentative and ethical questions**, not just trivia. The
+teaching — with a focus on **argumentative and ethical questions**, not just trivia (but trivia are fun and who am I to judge so there's also a quiz mode). The
 audience joins from any browser with a code or QR (no app, no login); the presenter drives
 the deck and sees results update live.
 
