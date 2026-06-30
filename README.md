@@ -9,7 +9,7 @@
 
 ---
 
-RoomPulse is a self-hosted, Mentimeter-style live polling tool, built for keynotes and
+RoomPulse is a self-hosted live polling tool, built for keynotes and
 teaching — with a focus on **argumentative and ethical questions**, not just trivia. The
 audience joins from any browser with a code or QR (no app, no login); the presenter drives
 the deck and sees results update live.
