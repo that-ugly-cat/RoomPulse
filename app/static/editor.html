@@ -65,7 +65,7 @@
 <body>
 <div class="grid">
   <aside class="side">
-    <h1>ROOMPULSE · EDITOR <a href="#" id="logout" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0">esci</a><a href="#" id="settingsbtn" title="settings" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0;margin-right:10px">⚙</a></h1>
+    <h1>ROOMPULSE · EDITOR <a href="#" id="logout" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0">esci</a><a href="#" id="settingsbtn" title="settings" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0;margin-right:10px">⚙</a><a href="/guide" target="_blank" id="guidelink" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0;margin-right:10px">📖</a></h1>
     <select id="lang" style="background:#20242d;color:var(--muted);border:1px solid var(--bar);border-radius:8px;padding:4px 7px;font-size:.8rem;margin-bottom:8px">
       <option value="it">IT</option><option value="en">EN</option><option value="de">DE</option></select>
     <div class="row"><input id="newtitle" placeholder="Titolo nuova deck">
@@ -117,6 +117,8 @@ async function initI18n() {
   document.documentElement.lang = lang;
   $("#lang").value = lang;
   $("#logout").textContent = T.logout;
+  $("#guidelink").textContent = "📖 " + T.user_guide;
+  $("#guidelink").title = T.user_guide;
   $("#importbtn").textContent = T.import_deck;
   $("#newtitle").placeholder = T.new_deck_ph;
   if ($("#placeholder")) $("#placeholder").textContent = T.pick_deck;

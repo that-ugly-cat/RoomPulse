@@ -66,6 +66,11 @@ def login_page():
     return FileResponse(STATIC_DIR / "login.html")
 
 
+@app.get("/guide")
+def guide_page():
+    return FileResponse(STATIC_DIR / "guide.html")
+
+
 class LoginIn(BaseModel):
     email: str
     password: str

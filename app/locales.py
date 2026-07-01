@@ -166,6 +166,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "have_account":      "Hai già un account? Accedi",
         "register_error":    "Registrazione fallita.",
         "export_data":       "Esporta dati (CSV)",
+        "user_guide":        "Guida utente",
     },
     "en": {
         "code_label":        "code",
@@ -318,6 +319,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "have_account":      "Already have an account? Sign in",
         "register_error":    "Registration failed.",
         "export_data":       "Export data (CSV)",
+        "user_guide":        "User guide",
     },
     "de": {
         "code_label":        "Code",
@@ -470,6 +472,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "have_account":      "Schon ein Konto? Anmelden",
         "register_error":    "Registrierung fehlgeschlagen.",
         "export_data":       "Daten exportieren (CSV)",
+        "user_guide":        "Benutzerhandbuch",
     },
 }
 

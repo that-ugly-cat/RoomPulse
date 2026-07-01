@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoomPulse — User guide</title>
+<link rel="icon" href="/static/imgs/favicon.png">
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --fg:#e8eaed; --muted:#9aa0ab;
+          --accent:#16a3ab; --bar:#2a2e38; --ok:#3fb950; --danger:#d9554f; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif;
+         background:var(--bg); color:var(--fg); line-height:1.65; }
+  a { color:var(--accent); }
+  .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px;
+        padding:16px 22px; border-bottom:1px solid var(--bar); position:sticky; top:0;
+        background:rgba(15,17,21,.92); backdrop-filter:blur(6px); z-index:10; }
+  .topbar img { height:30px; width:auto; }
+  .topbar .back { font-size:.9rem; }
+  .layout { display:grid; grid-template-columns:220px 1fr; gap:32px; max-width:1000px;
+        margin:0 auto; padding:28px 24px 80px; }
+  nav.toc { position:sticky; top:78px; align-self:start; font-size:.9rem; }
+  nav.toc a { display:block; color:var(--muted); text-decoration:none; padding:5px 0; border-left:2px solid transparent; padding-left:12px; }
+  nav.toc a:hover { color:var(--fg); border-left-color:var(--bar); }
+  main { min-width:0; }
+  h1 { font-size:1.9rem; margin:0 0 6px; }
+  .lede { color:var(--muted); font-size:1.05rem; margin:0 0 30px; }
+  h2 { font-size:1.3rem; margin:38px 0 10px; padding-top:8px; }
+  h3 { font-size:1.02rem; margin:22px 0 6px; }
+  p, li { color:#d3d7de; }
+  .muted { color:var(--muted); }
+  code { background:#0e2a2e; color:#8fe3e8; padding:2px 7px; border-radius:5px; font-size:.88em; }
+  pre { background:#0e2a2e; padding:14px 16px; border-radius:10px; overflow-x:auto; }
+  pre code { background:none; padding:0; color:#cfeef0; }
+  table { border-collapse:collapse; width:100%; margin:12px 0; font-size:.92rem; }
+  th, td { border:1px solid var(--bar); padding:8px 11px; text-align:left; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; background:#15181e; }
+  .card { background:var(--card); border:1px solid var(--bar); border-radius:12px; padding:16px 18px; margin:16px 0; }
+  .kbd { background:#20242d; border:1px solid var(--bar); border-radius:6px; padding:1px 7px; font-size:.85em; }
+  .tag { display:inline-block; background:#13343a; color:var(--accent); border-radius:20px; padding:1px 9px; font-size:.75rem; }
+  ol li, ul li { margin:4px 0; }
+  @media (max-width:760px) {
+    .layout { grid-template-columns:1fr; gap:0; padding:20px 18px 60px; }
+    nav.toc { display:none; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <img src="/static/imgs/logo.png" alt="RoomPulse" onerror="this.outerHTML='<b style=\'letter-spacing:.12em\'>ROOMPULSE</b>'">
+  <a class="back" href="/edit">← Back to the app</a>
+</div>
+
+<div class="layout">
+  <nav class="toc">
+    <a href="#intro">What it is</a>
+    <a href="#start">Getting started</a>
+    <a href="#deck">Building a deck</a>
+    <a href="#types">Slide types</a>
+    <a href="#surfaces">The three surfaces</a>
+    <a href="#run">Running a session</a>
+    <a href="#prepost">Pre / post</a>
+    <a href="#quiz">Quiz mode</a>
+    <a href="#groups">Random groups</a>
+    <a href="#donut">Donut energizer</a>
+    <a href="#clustering">AI clustering</a>
+    <a href="#moderation">Moderation</a>
+    <a href="#data">Export &amp; import</a>
+    <a href="#tips">Tips &amp; troubleshooting</a>
+  </nav>
+
+  <main>
+    <h1>RoomPulse — user guide</h1>
+    <p class="lede">Live polling for talks and lectures. Your audience answers from their phones;
+      results appear as you speak. This guide walks a presenter through building a deck, running a
+      live session, and using every question type.</p>
+
+    <h2 id="intro">What it is</h2>
+    <p>RoomPulse is a self-hosted, Mentimeter-style tool built for keynotes and teaching — with a
+      focus on <b>argumentative and ethical questions</b>, not just trivia. Three ideas shape it:</p>
+    <ul>
+      <li><b>The audience follows you.</b> No push: their screen shows whatever slide you've made
+        active. You get manual reveal and stage control for free.</li>
+      <li><b>Zero friction.</b> No app, no login for the audience — a 5-digit code or a QR code, and
+        they're in.</li>
+      <li><b>Quantitative vs. moderated.</b> Numeric types draw a chart; free-text types pass through
+        a presenter-side moderation queue.</li>
+    </ul>
+
+    <h2 id="start">Getting started</h2>
+    <ol>
+      <li>Open the app and <b>register</b> (or sign in) on the login page. Your account owns your
+        decks — you only ever see your own.</li>
+      <li>You land in the <b>editor</b> (your dashboard). Create a deck with the <span class="kbd">+</span>
+        next to the title field on the left.</li>
+      <li>Add slides, then open the <b>presenter</b> view to project and drive the session.</li>
+      <li>Share the <b>join code</b> or QR with the room. That's it.</li>
+    </ol>
+    <p class="muted">The UI is available in Italian, English and German — switch with the language
+      selector on any page.</p>
+
+    <h2 id="deck">Building a deck</h2>
+    <p>A <b>deck</b> is a reusable template of slides. In the editor:</p>
+    <ul>
+      <li><b>Add a slide</b> — pick a type, write the question, fill in the type-specific config
+        (options, labels, min/max…), then <span class="kbd">Add</span>.</li>
+      <li><b>Reorder</b> — drag the <span class="kbd">≡</span> handle.</li>
+      <li><b>Inspect</b> — click a slide to expand its config; <b>rename</b> the deck with the
+        <span class="kbd">✎</span>.</li>
+      <li><b>Export / import</b> a deck as JSON to move it between accounts or back it up.</li>
+    </ul>
+    <p>The same deck can be <b>run many times</b>. Each <i>run</i> keeps its own responses, so you can
+      reuse a deck across classes or sessions without mixing the data.</p>
+
+    <h2 id="types">Slide types</h2>
+    <p>Ten question types plus a game. One question is active at a time; the audience sees exactly
+      what you activate.</p>
+    <table>
+      <tr><th>Type</th><th>What the audience does</th><th>How results show</th></tr>
+      <tr><td><b>Single / multiple choice</b></td><td>Tap one or more options; can allow
+        participant-added options, or run as a quiz.</td><td>Bar per option.</td></tr>
+      <tr><td><b>Scale / Likert</b></td><td>Pick a value between min and max.</td><td>Mean + histogram.</td></tr>
+      <tr><td><b>Word cloud</b></td><td>Type one or two words.</td><td>Words sized by frequency.</td></tr>
+      <tr><td><b>2×2 quadrant</b></td><td>Tap a point on a labelled pad.</td><td>Cloud of points.</td></tr>
+      <tr><td><b>Ranking</b></td><td>Drag items into order.</td><td>Mean rank per item.</td></tr>
+      <tr><td><b>Points (100)</b></td><td>Distribute 100 points across options.</td><td>Total per option.</td></tr>
+      <tr><td><b>Open text</b></td><td>Write a free answer.</td><td>Moderated feed.</td></tr>
+      <tr><td><b>Q&amp;A + upvote</b></td><td>Ask questions and upvote others'.</td><td>Feed sorted by votes.</td></tr>
+      <tr><td><b>Claim + justification</b></td><td>State a criterion and why.</td><td>Paired feed; AI clustering optional.</td></tr>
+      <tr><td><b>Random groups</b></td><td>Get assigned to a balanced group.</td><td>Count per group.</td></tr>
+      <tr><td><b>Donut</b> <span class="tag">game</span></td><td>Play a one-button runner.</td><td>Live leaderboard + histogram.</td></tr>
+    </table>
+
+    <h2 id="surfaces">The three surfaces</h2>
+    <table>
+      <tr><th>Surface</th><th>Who</th><th>What it's for</th></tr>
+      <tr><td><b>Editor</b></td><td>you (private)</td><td>Build decks, order slides, set your API key.</td></tr>
+      <tr><td><b>Presenter</b></td><td>you (private)</td><td>The projection: active question, live results, controls, QR + code, moderation queue.</td></tr>
+      <tr><td><b>Audience</b></td><td>public</td><td>Enter the code / scan the QR, answer, see results when you reveal them.</td></tr>
+    </table>
+    <p>The audience follows the presenter via light polling (about once a second) — no websockets,
+      nothing to install.</p>
+
+    <h2 id="run">Running a session</h2>
+    <ol>
+      <li>Open the <b>presenter</b> view for a deck (from the editor, <span class="kbd">Presenter ↗</span>).</li>
+      <li>Click a slide on the left to <b>activate</b> it. The first activation starts a <b>run</b>
+        automatically; use <span class="kbd">New run</span> to start a fresh one (e.g. a new class).</li>
+      <li>The audience is now answering. Watch the count and results update live.</li>
+      <li>Control the slide state:
+        <ul>
+          <li><span class="kbd">Show results</span> / <span class="kbd">Hide</span> — reveal the chart to the audience (the classic dramatic reveal).</li>
+          <li><span class="kbd">Reopen voting</span> — let people change or add answers.</li>
+        </ul>
+      </li>
+    </ol>
+    <p class="muted">Q&amp;A and Donut use <b>open / closed</b> instead of reveal: the feed / leaderboard
+      is always visible, and you just open or close submissions.</p>
+
+    <h2 id="prepost">Pre / post</h2>
+    <p>Ask the <b>same question before and after</b> your argument and show how the room moved. When
+      adding a slide of type <i>scale</i>, <i>choice</i> or <i>quadrant</i>, link it as the <b>POST</b>
+      of an earlier twin. The results view overlays the two and draws the shift: the change in mean
+      for scales, per-option deltas for choice, and an arrow between the centroids for the quadrant.</p>
+    <p>This is the strong move for ethical topics — you measure how much the argument actually shifted
+      positions.</p>
+
+    <h2 id="quiz">Quiz mode</h2>
+    <p>Turn a choice question into a quiz: mark the correct option(s). Participants find out whether
+      they were right <b>only after</b> they answer, their answer locks (no changing it), and the
+      correct answer is never leaked before the reveal. Quiz mode and participant-added options are
+      mutually exclusive.</p>
+
+    <h2 id="groups">Random groups</h2>
+    <p>The <b>randomizer</b> splits the room into named groups. Assignment is <b>balanced</b> (it fills
+      the smallest group next) and <b>stable per participant</b> — refreshing keeps you in the same
+      group. Handy for break-out activities and debates.</p>
+
+    <h2 id="donut">Donut energizer</h2>
+    <p>Not a question but a break that <b>also produces data</b>: a one-button endless-runner
+      (<span class="kbd">tap</span> anywhere or <span class="kbd">space</span> to jump) that runs on
+      the audience's phones. Dodge the ruins, grab donuts (+100 each), and everyone's best scores build
+      a live leaderboard. Each player keeps their <b>best score</b>; retries are free. Useful when the
+      talk is about attention or human factors — the real distribution of scores becomes a talking
+      point. Open / closed works like Q&amp;A: while open people play and see the top few; when you
+      close it the full leaderboard shows.</p>
+
+    <h2 id="clustering">AI argument clustering</h2>
+    <p>For <b>Claim + justification</b> and <b>Open text</b>, an LLM can group free responses into
+      descriptive themes — for claim+justification along two axes (the criterion <b>and</b> the kind of
+      appeal, with a criterion × appeal matrix). It's descriptive, never evaluative.</p>
+    <ol>
+      <li>Open the editor, click <span class="kbd">⚙</span>, and paste your own Anthropic API key
+        (stored per user). Get one at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>.</li>
+      <li>During the session, click <span class="kbd">Cluster</span> on that slide. Re-run any time to
+        refresh as more answers come in.</li>
+    </ol>
+
+    <h2 id="moderation">Moderation</h2>
+    <p>Free-text types (open text, Q&amp;A, claim+justification) show a <b>moderation queue</b> next to
+      the results on the presenter view. Answers are visible by default; hide a troll with one click,
+      show it again if you change your mind. The audience only ever sees visible answers.</p>
+
+    <h2 id="data">Export &amp; import</h2>
+    <ul>
+      <li><b>Deck (JSON)</b> — <span class="kbd">Export deck</span> / <span class="kbd">Import deck</span>
+        moves the template (slides + config, pre/post links preserved) between accounts.</li>
+      <li><b>Data (CSV)</b> — <span class="kbd">Export data</span> downloads the <b>active run's</b>
+        responses: one row each, with resolved labels, claim/justification and cluster tags in their
+        own columns — ready for a paper or a spreadsheet.</li>
+    </ul>
+
+    <h2 id="tips">Tips &amp; troubleshooting</h2>
+    <ul>
+      <li><b>One fixed code per deck.</b> The join code lives on the deck, not the run — the audience
+        always uses the same code / QR, and the backend routes it to the current run.</li>
+      <li><b>Nothing on screen?</b> The audience only sees a question once you've <i>activated</i> one.
+        Until then they see a waiting screen.</li>
+      <li><b>Quiz answer won't change.</b> That's by design — quiz answers lock after the first submit.</li>
+      <li><b>Back up your data</b> by exporting the CSV of a run before you delete a deck; deletion is
+        permanent and takes runs, responses and votes with it.</li>
+      <li><b>Privacy.</b> The audience is anonymous (a lightweight browser token, no login). Treat the
+        join code as the only gate.</li>
+    </ul>
+    <p class="muted" style="margin-top:34px">Questions or ideas? RoomPulse is open source —
+      <a href="https://github.com/that-ugly-cat/RoomPulse" target="_blank">that-ugly-cat/RoomPulse</a>.</p>
+  </main>
+</div>
+</body>
+</html>
