@@ -20,6 +20,9 @@ the deck and sees results update live. Try it live [here](https://roompulse.bora
   options), Likert scale, word cloud, 2×2 quadrant, ranking (drag & drop), points
   allocation, open text, Q&A with upvotes, *claim + justification*, and a random group
   splitter.
+- **Donut energizer** — a one-button endless-runner (tap / spacebar) played on the audience's
+  phones: dodge the ruins, grab donuts, and everyone's best scores build a live leaderboard.
+  A break that *also* produces data — handy when the talk is about attention or human factors.
 - **Quiz mode** — mark correct answers; participants see if they got it right (the answer is
   never leaked before they respond).
 - **Pre/post** — ask the same question before and after your argument and show the shift

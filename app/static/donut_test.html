@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Donut — test</title>
+<style>
+  body { margin:0; font-family:system-ui,sans-serif; background:#0f1115; color:#e8eaed;
+         min-height:100vh; display:flex; align-items:center; justify-content:center; }
+  .wrap { width:min(760px,94vw); padding:16px; }
+  h1 { font-size:1rem; color:#9aa0ab; letter-spacing:.05em; }
+  #game { width:100%; }
+  .stats { display:flex; gap:24px; margin-top:12px; font-size:1.1rem; }
+  .stats b { color:#16a3ab; }
+  .hint { color:#9aa0ab; font-size:.85rem; margin-top:8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>DONUT — pagina di test (tap / spazio per saltare)</h1>
+  <div id="game"></div>
+  <div class="stats">
+    <div>Ultimo: <b id="last">–</b></div>
+    <div>Record: <b id="best">–</b></div>
+    <div>Partite: <b id="games">0</b></div>
+  </div>
+  <p class="hint">Case (piccole e grandi) da saltare · pterodattili bassi da saltare, alti ci passi sotto · la velocità sale con la distanza.</p>
+</div>
+<script src="/static/donut.js"></script>
+<script>
+  let best = 0, games = 0;
+  Donut.mount(document.getElementById("game"), {
+    texts: { tap: "Tocca / spazio per iniziare", gameOver: "Game over —", retry: "Tocca per riprovare" },
+    onGameOver: (score) => {
+      games++; best = Math.max(best, score);
+      document.getElementById("last").textContent = score;
+      document.getElementById("best").textContent = best;
+      document.getElementById("games").textContent = games;
+    }
+  });
+</script>
+</body>
+</html>

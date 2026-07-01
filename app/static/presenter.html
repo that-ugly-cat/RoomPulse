@@ -144,8 +144,12 @@ function render() {
 function renderMain(slide, st, results, moderation, pair) {
   const hasMod = moderation != null;
   const isQa = slide.type === "qa";
-  const controls = isQa
-    ? `<button class="primary" id="qatoggle">${st==="open"?T.close_questions:T.reopen_questions}</button>
+  const isDonut = slide.type === "donut";
+  const isToggle = isQa || isDonut;   // stati open/closed, niente reveal
+  const controls = isToggle
+    ? `<button class="primary" id="qatoggle">${st==="open"
+         ? (isDonut?T.close_game:T.close_questions)
+         : (isDonut?T.reopen_game:T.reopen_questions)}</button>
        <button id="newrun">${T.new_run}</button>`
     : `<button class="primary" id="reveal">${st==="revealed"?T.hide_results:T.show_results}</button>
        <button id="open">${T.reopen_vote}</button>
@@ -159,7 +163,7 @@ function renderMain(slide, st, results, moderation, pair) {
       <div id="res"></div>
       ${hasMod?'<div id="mod"></div>':''}
     </div>`;
-  if (isQa) {
+  if (isToggle) {
     $("#qatoggle").onclick = () => setState(slide.id, st==="open"?"closed":"open");
   } else {
     $("#reveal").onclick = () => setState(slide.id, st==="revealed"?"open":"revealed");
@@ -246,6 +250,19 @@ function renderResults(r) {
     const max=Math.max(1,...r.groups.map(g=>g.count));
     return r.groups.map(g=>bar(g.name, g.count, max)).join("")
       + `<p class="meta">${r.n} ${T.responses_word}</p>`;
+  }
+  if (r.type === "donut") {
+    const lb = r.leaderboard || [];
+    if (!lb.length) return `<p class="meta">${T.waiting_responses}</p>`;
+    const max = Math.max(1, ...lb.map(e=>e.score));
+    const board = lb.map((e,i)=>bar(`${i+1}. ${e.name}`, e.score, max)).join("");
+    const hmax = Math.max(1, ...(r.histogram||[]).map(h=>h.count));
+    const hist = (r.histogram||[]).map(h=>`<div class="barrow">
+      <span class="name" style="width:24%;font-size:.85rem;color:var(--muted)">${h.lo}–${h.hi}</span>
+      <span class="bartrack" style="height:24px"><span class="barfill" style="width:${Math.round(h.count/hmax*100)}%">${h.count||""}</span></span></div>`).join("");
+    return board
+      + `<p class="meta" style="margin-top:24px">max <span class="big" style="font-size:1.5rem">${r.max}</span> · ${T.median} <b>${r.median}</b> · ${r.n} ${T.responses_word}</p>`
+      + hist;
   }
   return `<p class="meta">${r.n||0} ${T.responses_word}</p>`;
 }

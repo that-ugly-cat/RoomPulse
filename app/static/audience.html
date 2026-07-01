@@ -91,6 +91,7 @@
 </div>
 <div class="toast" id="toast"></div>
 
+<script src="/static/donut.js"></script>
 <script>
 const $ = (s, r=document) => r.querySelector(s);
 const root = $("#root");
@@ -104,6 +105,9 @@ let code = params.get("c") || localStorage.getItem("rp_code") || "";
 let lastSig = "";
 let qaSlideId = null;    // per ridisegnare la shell QA solo al cambio slide
 let groupsSlideId = null; // per assegnare il gruppo una sola volta per slide
+let donutSlideId = null; // monta il gioco una sola volta per slide
+let donutGame = null;    // istanza corrente del gioco (per destroy al cambio slide)
+let donutOpen = false;   // stato open/closed corrente (letto in onGameOver)
 let getPayload = null;   // funzione che il tipo corrente espone per costruire il payload
 let qaVoted = JSON.parse(localStorage.getItem("rp_qavotes") || "{}");
 
@@ -325,6 +329,46 @@ async function renderGroup(data) {
   } catch { groupsSlideId = null; }
 }
 
+// --- donut: mini-gioco (energizer che genera dati) --------------------------
+function renderDonutShell(data) {
+  const s = data.slide;
+  if (donutGame) { donutGame.destroy(); donutGame = null; }
+  root.innerHTML = `<div class="card"><p class="q">${s.question||""}</p>
+      <div id="donutgame"></div>
+      <p class="muted" id="donutclosed" style="display:none;margin:10px 0 0">${T.donut_closed}</p></div>
+    <div id="donutlb"></div><p class="code">${T.code_label} ${code}</p>`;
+  donutGame = Donut.mount($("#donutgame"), {
+    texts: { tap: T.donut_tap, gameOver: T.game_over, retry: T.donut_retry },
+    onGameOver: (score) => { if (donutOpen) submitDonut(s.id, score); },
+  });
+}
+
+async function submitDonut(slideId, score) {
+  let name = localStorage.getItem("rp_name");
+  if (!name) {
+    name = (prompt(T.enter_name) || "").trim().slice(0, 40);
+    if (name) localStorage.setItem("rp_name", name);
+  }
+  try {
+    const res = await fetch(`/api/live/${code}/respond`, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({slide_id:slideId, token, payload:{score, name: name || "—"}})});
+    if (res.ok) { const d = await res.json(); toast("🍩 " + (d.best!=null?d.best:score)); }
+  } catch {}
+}
+
+function updateDonutLb(results, open) {
+  const el = $("#donutlb"); if (!el) return;
+  const banner = $("#donutclosed"); if (banner) banner.style.display = open ? "none" : "block";
+  const lb = (results && results.leaderboard) || [];
+  const shown = open ? lb.slice(0, 3) : lb;   // open: teaser top3 · closed: classifica piena
+  const max = Math.max(1, ...lb.map(e=>e.score));
+  el.innerHTML = `<div class="card"><p class="meta">${T.leaderboard}</p>` +
+    (shown.map((e,i)=>`<div class="barrow"><span class="name">${i+1}. ${e.name}</span>
+       <span class="bartrack"><span class="barfill" style="width:${Math.max(8,Math.round(e.score/max*100))}%">${e.score}</span></span></div>`).join("")
+     || `<p class="muted">${T.no_answers}</p>`) + `</div>`;
+}
+
 function renderSlide(data) {
   const s = data.slide;
   const inp = buildInput(s);
@@ -479,6 +523,10 @@ async function poll() {
     const res = await fetch(`/api/live/${code}`);
     if (res.status === 404) { code=""; localStorage.removeItem("rp_code"); renderJoin(); return; }
     const data = await res.json();
+    // lasciando una slide donut: distruggi il gioco (RAF + listener spazio)
+    if (donutGame && !(data.slide && data.slide.type === "donut")) {
+      donutGame.destroy(); donutGame = null; donutSlideId = null;
+    }
     if (data.status === "waiting") { if (lastSig!=="waiting") renderWaiting(data.title); return; }
     const sig = `${data.slide.id}:${data.state}`;
     if (data.slide.type === "qa") {        // qa: shell solo al cambio slide, feed+stato ad ogni poll
@@ -492,6 +540,13 @@ async function poll() {
       return;
     }
     groupsSlideId = null;
+    if (data.slide.type === "donut") {     // donut: monta il gioco al cambio slide, leaderboard ad ogni poll
+      donutOpen = data.state === "open";
+      if (data.slide.id !== donutSlideId) { donutSlideId = data.slide.id; renderDonutShell(data); }
+      updateDonutLb(data.results, donutOpen);
+      return;
+    }
+    donutSlideId = null;
     if (sig === lastSig) return;
     lastSig = sig;
     if (data.state === "revealed") renderResults(data);

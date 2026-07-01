@@ -861,6 +861,8 @@ def _fmt_answer(stype: str, p: dict, optmap: dict) -> str:
         return p.get("text", "")
     if stype == "groups":
         return p.get("group_name", "")
+    if stype == "donut":
+        return str(p.get("score", ""))
     if stype == "argpoll":
         return ""  # claim/justification vanno nelle loro colonne
     return json.dumps(p, ensure_ascii=False)
@@ -964,6 +966,9 @@ def live(code: str):
         if slide["type"] == "qa":
             # qa: il pubblico vede e vota le domande altrui anche mentre è 'open'
             payload["feed"] = _qa_results(conn, rid, active)
+        if slide["type"] == "donut":
+            # leaderboard non segreta: sempre allegata (l'audience mostra top3 se open, tutto se closed)
+            payload["results"] = _results(conn, rid, slide)
         if slide["type"] == "mc":
             # mc: opzioni base + quelle aggiunte dai partecipanti (allow_other)
             cfg = payload["slide"]["config"]
@@ -1094,6 +1099,30 @@ def respond(code: str, body: RespondIn):
                 )
                 picks = _picks(body.payload)
                 return {"ok": True, "quiz": {"correct": set(picks) == correct, "correct_ids": list(correct)}}
+
+        # donut: best-score per token (tieni il massimo) + cap anti-assurdo
+        if slide["type"] == "donut":
+            raw = body.payload.get("score")
+            if not isinstance(raw, (int, float)) or raw < 0 or raw > 100000:
+                raise HTTPException(400, "punteggio non valido")
+            score = int(raw)
+            name = str(body.payload.get("name") or "").strip()[:40]
+            ex = conn.execute(
+                "SELECT id, payload FROM response WHERE run_id=? AND slide_id=? AND participant_token=?",
+                (rid, body.slide_id, body.token),
+            ).fetchone()
+            if ex:
+                prev = json.loads(ex["payload"])
+                payload = {"score": max(score, int(prev.get("score", 0))), "name": name or prev.get("name", "—")}
+                conn.execute("UPDATE response SET payload=? WHERE id=?", (json.dumps(payload), ex["id"]))
+            else:
+                payload = {"score": score, "name": name or "—"}
+                conn.execute(
+                    "INSERT INTO response (id, run_id, slide_id, participant_token, payload, created_at) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (db.new_id(), rid, body.slide_id, body.token, json.dumps(payload), db.now_iso()),
+                )
+            return {"ok": True, "best": payload["score"]}
 
         # voto singolo → upsert: rimuovo il voto precedente di questo token
         if slide["type"] in SINGLE_VOTE_TYPES:

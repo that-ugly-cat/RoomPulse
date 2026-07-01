@@ -175,6 +175,43 @@ def _argpoll(config, rows):
     return {"type": "argpoll", "n": len(items), "items": items}
 
 
+def _donut(config, rows):
+    """Endless-runner: leaderboard + istogramma dei punteggi. Un record per token (best-score).
+    Non moderato; l'upsert best-score sta in main.respond."""
+    entries = []
+    for p in _payloads(rows):
+        s = p.get("score")
+        if isinstance(s, (int, float)):
+            entries.append({"name": (str(p.get("name") or "").strip()[:40]) or "—", "score": int(s)})
+    entries.sort(key=lambda e: -e["score"])
+    scores = sorted(e["score"] for e in entries)
+    n = len(scores)
+    mx = scores[-1] if scores else 0
+    if n:
+        mid = n // 2
+        median = scores[mid] if n % 2 else (scores[mid - 1] + scores[mid]) // 2
+    else:
+        median = 0
+    histogram = []
+    if n:
+        nb = 10
+        width = max(1, mx // nb + 1)  # ~10 bucket da 0 al massimo
+        counts = [0] * nb
+        for s in scores:
+            counts[min(nb - 1, s // width)] += 1
+        histogram = [
+            {"lo": i * width, "hi": (i + 1) * width - 1, "count": counts[i]} for i in range(nb)
+        ]
+    return {
+        "type": "donut",
+        "n": n,
+        "leaderboard": entries[:10],
+        "max": mx,
+        "median": median,
+        "histogram": histogram,
+    }
+
+
 _DISPATCH = {
     "mc": _mc,
     "scale": _scale,
@@ -185,6 +222,7 @@ _DISPATCH = {
     "opentext": _opentext,
     "argpoll": _argpoll,
     "groups": _groups,
+    "donut": _donut,
 }
 
 # Voto singolo → upsert per (run, slide, token). Gli altri ammettono più invii.
