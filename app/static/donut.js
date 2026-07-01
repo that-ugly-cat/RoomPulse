@@ -254,11 +254,19 @@
     loop();
 
     function onKey(e) { if (e.code === "Space") { e.preventDefault(); jump(); } }
-    function onTap(e) { e.preventDefault(); jump(); }
+    function onTap(e) {
+      // tap in qualunque punto dello schermo = salto, tranne sui controlli interattivi
+      if (e.button && e.button !== 0) return;
+      if (e.target && e.target.closest && e.target.closest("input,select,textarea,button,a,label")) return;
+      jump();
+    }
     window.addEventListener("keydown", onKey);
-    cv.addEventListener("touchstart", onTap, { passive: false });
-    cv.addEventListener("mousedown", onTap);
-    return { destroy() { cancelAnimationFrame(raf); ro.disconnect(); window.removeEventListener("keydown", onKey); } };
+    window.addEventListener("pointerdown", onTap);
+    return { destroy() {
+      cancelAnimationFrame(raf); ro.disconnect();
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onTap);
+    } };
   };
   function Donut() {}
   window.Donut = window.Donut || Donut;

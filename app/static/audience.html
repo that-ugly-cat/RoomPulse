@@ -12,7 +12,10 @@
   .big { font-size:2rem; font-weight:800; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif;
-         background:var(--bg); color:var(--fg); min-height:100vh; }
+         background:var(--bg); color:var(--fg); min-height:100vh;
+         overflow-x:hidden; touch-action:manipulation; }
+  .donutwrap { width:100vw; margin-left:calc(50% - 50vw); margin-top:12px; margin-bottom:12px; }
+  .donutwrap canvas { border-radius:0 !important; display:block; }
   .wrap { max-width:560px; margin:0 auto; padding:24px 18px 60px; }
   h1 { font-size:1.1rem; color:var(--muted); font-weight:600; letter-spacing:.04em; }
   .card { background:var(--card); border-radius:14px; padding:22px; margin-top:16px; }
@@ -333,9 +336,9 @@ async function renderGroup(data) {
 function renderDonutShell(data) {
   const s = data.slide;
   if (donutGame) { donutGame.destroy(); donutGame = null; }
-  root.innerHTML = `<div class="card"><p class="q">${s.question||""}</p>
-      <div id="donutgame"></div>
-      <p class="muted" id="donutclosed" style="display:none;margin:10px 0 0">${T.donut_closed}</p></div>
+  root.innerHTML = `<div class="card" style="margin-bottom:0"><p class="q" style="margin:0">${s.question||""}</p></div>
+    <div class="donutwrap"><div id="donutgame"></div></div>
+    <p class="muted" id="donutclosed" style="display:none;text-align:center;margin:0 0 10px">${T.donut_closed}</p>
     <div id="donutlb"></div><p class="code">${T.code_label} ${code}</p>`;
   donutGame = Donut.mount($("#donutgame"), {
     texts: { tap: T.donut_tap, gameOver: T.game_over, retry: T.donut_retry },
