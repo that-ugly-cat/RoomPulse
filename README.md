@@ -32,7 +32,7 @@ the deck and sees results update live. Try it live [here](https://roompulse.bora
   criterion **and** the kind of appeal, with a criterion × appeal matrix). Each presenter
   uses their own Anthropic API key.
 - **Live moderation** for free-text answers, **per-owner isolation** (each user only sees
-  their own decks), **deck export/import** (JSON) and **data export** (CSV).
+  their own decks), **deck export/import** (JSON) and **data export** (Excel — one sheet per run).
 - **Trilingual UI** — Italian, English, German.
 
 ## How it works

@@ -165,7 +165,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "no_account":        "Non hai un account? Registrati",
         "have_account":      "Hai già un account? Accedi",
         "register_error":    "Registrazione fallita.",
-        "export_data":       "Esporta dati (CSV)",
+        "export_data":       "Esporta dati (Excel)",
         "user_guide":        "Guida utente",
     },
     "en": {
@@ -318,7 +318,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "no_account":        "No account? Register",
         "have_account":      "Already have an account? Sign in",
         "register_error":    "Registration failed.",
-        "export_data":       "Export data (CSV)",
+        "export_data":       "Export data (Excel)",
         "user_guide":        "User guide",
     },
     "de": {
@@ -471,7 +471,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "no_account":        "Kein Konto? Registrieren",
         "have_account":      "Schon ein Konto? Anmelden",
         "register_error":    "Registrierung fehlgeschlagen.",
-        "export_data":       "Daten exportieren (CSV)",
+        "export_data":       "Daten exportieren (Excel)",
         "user_guide":        "Benutzerhandbuch",
     },
 }

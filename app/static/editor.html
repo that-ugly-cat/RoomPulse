@@ -291,12 +291,12 @@ async function exportDeck(id) {
 }
 
 async function exportData(id) {
-  const res = await fetch(`/api/presentations/${id}/data.csv`);
+  const res = await fetch(`/api/presentations/${id}/data.xlsx`);
   if (!res.ok) { const e = await res.json().catch(()=>({})); alert(e.detail || "Errore export dati"); return; }
   const blob = await res.blob();
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "roompulse_dati.csv";
+  a.download = "roompulse_dati.xlsx";
   a.click(); URL.revokeObjectURL(a.href);
 }
 

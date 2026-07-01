@@ -205,9 +205,10 @@
     <ul>
       <li><b>Deck (JSON)</b> — <span class="kbd">Export deck</span> / <span class="kbd">Import deck</span>
         moves the template (slides + config, pre/post links preserved) between accounts.</li>
-      <li><b>Data (CSV)</b> — <span class="kbd">Export data</span> downloads the <b>active run's</b>
-        responses: one row each, with resolved labels, claim/justification and cluster tags in their
-        own columns — ready for a paper or a spreadsheet.</li>
+      <li><b>Data (Excel)</b> — <span class="kbd">Export data</span> downloads an <code>.xlsx</code>
+        workbook for the deck: an <b>Overview</b> sheet listing every run, then <b>one sheet per run</b>
+        with the raw responses (one row each, resolved labels, claim/justification and cluster tags in
+        their own columns) — the full history in one file, ready for a paper or a spreadsheet.</li>
     </ul>
 
     <h2 id="tips">Tips &amp; troubleshooting</h2>
@@ -217,7 +218,7 @@
       <li><b>Nothing on screen?</b> The audience only sees a question once you've <i>activated</i> one.
         Until then they see a waiting screen.</li>
       <li><b>Quiz answer won't change.</b> That's by design — quiz answers lock after the first submit.</li>
-      <li><b>Back up your data</b> by exporting the CSV of a run before you delete a deck; deletion is
+      <li><b>Back up your data</b> by exporting the Excel workbook before you delete a deck; deletion is
         permanent and takes runs, responses and votes with it.</li>
       <li><b>Privacy.</b> The audience is anonymous (a lightweight browser token, no login). Treat the
         join code as the only gate.</li>

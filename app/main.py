@@ -8,12 +8,13 @@ Dev run:  uv run uvicorn app.main:app --reload --port 8080
 Seed:     uv run python seed.py
 """
 
-import csv
 import io
 import json
 import os
+import re
 
 import segno
+from openpyxl import Workbook
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -873,64 +874,103 @@ def _fmt_answer(stype: str, p: dict, optmap: dict) -> str:
     return json.dumps(p, ensure_ascii=False)
 
 
-@app.get("/api/presentations/{pid}/data.csv")
+_EXPORT_HEADER = ["slide_ord", "slide_type", "question", "participant", "created_at",
+                  "status", "claim", "justification", "answer", "cluster", "arg_cluster"]
+
+
+def _run_export_rows(conn, rid: str, slides) -> list[list]:
+    """Righe grezze di un run (una per risposta), con label risolte e cluster."""
+    clabels = {
+        c["id"]: c["label"]
+        for c in conn.execute("SELECT id, label FROM cluster WHERE run_id=?", (rid,)).fetchall()
+    }
+    out: list[list] = []
+    for s in slides:
+        cfg = json.loads(s["config"])
+        optmap: dict = {}
+        if s["type"] == "mc":
+            for o in cfg.get("options", []):
+                optmap[o["id"]] = o["label"]
+            for mo in conn.execute(
+                "SELECT id, label FROM mc_option WHERE run_id=? AND slide_id=?", (rid, s["id"])
+            ).fetchall():
+                optmap[mo["id"]] = mo["label"]
+        elif s["type"] == "ranking":
+            for o in cfg.get("items", []):
+                optmap[o["id"]] = o["label"]
+        elif s["type"] == "points":
+            for o in cfg.get("options", []):
+                optmap[o["id"]] = o["label"]
+        rows = conn.execute(
+            "SELECT participant_token, payload, status, created_at, "
+            "claim_cluster_id, arg_cluster_id, cluster_id FROM response "
+            "WHERE run_id=? AND slide_id=? ORDER BY created_at",
+            (rid, s["id"]),
+        ).fetchall()
+        for r in rows:
+            p = json.loads(r["payload"])
+            claim = p.get("claim", "") if s["type"] == "argpoll" else ""
+            just = p.get("justification", "") if s["type"] == "argpoll" else ""
+            primary = clabels.get(r["claim_cluster_id"]) or clabels.get(r["cluster_id"]) or ""
+            argc = clabels.get(r["arg_cluster_id"]) or ""
+            out.append([s["ord"], s["type"], s["question"], r["participant_token"],
+                        r["created_at"], r["status"], claim, just,
+                        _fmt_answer(s["type"], p, optmap), primary, argc])
+    return out
+
+
+def _safe_sheet_name(base: str, used: set) -> str:
+    """Nome foglio Excel valido: caratteri vietati rimossi, ≤31 char, unico."""
+    name = re.sub(r"[:\\/?*\[\]]", " ", base or "").strip()[:31] or "Run"
+    stem, i = name, 2
+    while name.lower() in used:
+        suffix = f" ({i})"
+        name = stem[:31 - len(suffix)] + suffix
+        i += 1
+    used.add(name.lower())
+    return name
+
+
+@app.get("/api/presentations/{pid}/data.xlsx")
 def export_data(pid: str, user: dict = CurrentUser):
-    """CSV grezzo delle risposte del run attivo: una riga per risposta, con cluster se presenti."""
+    """Workbook Excel: un foglio Overview (elenco run) + un foglio per run con le risposte grezze."""
     with db.get_conn() as conn:
         _check_owner(conn, pid, user)
         pres = conn.execute("SELECT * FROM presentation WHERE id=?", (pid,)).fetchone()
-        rid = pres["active_run_id"]
-        if not rid:
-            raise HTTPException(400, "nessun run attivo da esportare")
-        clabels = {
-            c["id"]: c["label"]
-            for c in conn.execute(
-                "SELECT id, label FROM cluster WHERE run_id=?", (rid,)
-            ).fetchall()
-        }
         slides = conn.execute(
             "SELECT * FROM slide WHERE presentation_id=? ORDER BY ord", (pid,)
         ).fetchall()
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["slide_ord", "slide_type", "question", "participant", "created_at",
-                    "status", "claim", "justification", "answer", "cluster", "arg_cluster"])
-        for s in slides:
-            cfg = json.loads(s["config"])
-            optmap: dict = {}
-            if s["type"] == "mc":
-                for o in cfg.get("options", []):
-                    optmap[o["id"]] = o["label"]
-                for mo in conn.execute(
-                    "SELECT id, label FROM mc_option WHERE run_id=? AND slide_id=?", (rid, s["id"])
-                ).fetchall():
-                    optmap[mo["id"]] = mo["label"]
-            elif s["type"] == "ranking":
-                for o in cfg.get("items", []):
-                    optmap[o["id"]] = o["label"]
-            elif s["type"] == "points":
-                for o in cfg.get("options", []):
-                    optmap[o["id"]] = o["label"]
-            rows = conn.execute(
-                "SELECT participant_token, payload, status, created_at, "
-                "claim_cluster_id, arg_cluster_id, cluster_id FROM response "
-                "WHERE run_id=? AND slide_id=? ORDER BY created_at",
-                (rid, s["id"]),
-            ).fetchall()
+        runs = conn.execute(
+            "SELECT * FROM run WHERE presentation_id=? ORDER BY started_at", (pid,)
+        ).fetchall()
+        if not runs:
+            raise HTTPException(400, "nessun run da esportare")
+
+        wb = Workbook()
+        ov = wb.active
+        ov.title = "Overview"
+        ov.append(["run", "label", "started_at", "responses", "slides answered"])
+        used = {"overview"}
+
+        for i, run in enumerate(runs, start=1):
+            rows = _run_export_rows(conn, run["id"], slides)
+            answered = len({r[0] for r in rows})  # slide_ord distinti con risposte
+            ov.append([i, run["label"] or "", run["started_at"], len(rows), answered])
+            if not rows:
+                continue  # run vuoto: resta in Overview, ma niente foglio dedicato
+            base = run["label"] or (run["started_at"] or "")[:16].replace("T", " ")
+            ws = wb.create_sheet(_safe_sheet_name(base, used))
+            ws.append(_EXPORT_HEADER)
             for r in rows:
-                p = json.loads(r["payload"])
-                claim = p.get("claim", "") if s["type"] == "argpoll" else ""
-                just = p.get("justification", "") if s["type"] == "argpoll" else ""
-                primary = clabels.get(r["claim_cluster_id"]) or clabels.get(r["cluster_id"]) or ""
-                argc = clabels.get(r["arg_cluster_id"]) or ""
-                w.writerow([s["ord"], s["type"], s["question"], r["participant_token"],
-                            r["created_at"], r["status"], claim, just,
-                            _fmt_answer(s["type"], p, optmap), primary, argc])
+                ws.append(r)
+
+        buf = io.BytesIO()
+        wb.save(buf)
         fname = "".join(ch if ch.isalnum() else "_" for ch in (pres["title"] or "deck")).lower()[:40]
         return Response(
             content=buf.getvalue(),
-            media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": f'attachment; filename="{fname}_dati.csv"'},
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{fname}_dati.xlsx"'},
         )
 
 
