@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoomPulse — admin</title>
+<link rel="icon" href="/static/imgs/favicon.png">
+<style>
+  :root { --bg:#0f1115; --card:#1a1d24; --fg:#e8eaed; --muted:#9aa0ab;
+          --accent:#16a3ab; --bar:#2a2e38; --ok:#3fb950; --danger:#d9554f; --orange:#e8862e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif;
+         background:var(--bg); color:var(--fg); }
+  .wrap { max-width:1000px; margin:0 auto; padding:22px 26px 70px; }
+  .top { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:20px; }
+  h1 { font-size:.85rem; color:var(--muted); letter-spacing:.1em; margin:0; }
+  a { color:var(--accent); text-decoration:none; font-size:.85rem; }
+  .links a { margin-left:14px; }
+  select.lang { background:#20242d; color:var(--muted); border:1px solid var(--bar); border-radius:8px; padding:3px 6px; font-size:.78rem; }
+  .banner { background:var(--card); border:1px solid var(--bar); border-radius:12px; padding:16px 20px; margin-bottom:18px;
+        display:flex; gap:36px; align-items:baseline; flex-wrap:wrap; }
+  .banner .big { font-size:1.9rem; font-weight:800; }
+  .banner .lbl { color:var(--muted); font-size:.75rem; text-transform:uppercase; letter-spacing:.07em; }
+  .warn { color:var(--orange); font-size:.85rem; }
+  .dist { background:var(--card); border:1px solid var(--bar); border-radius:12px; padding:14px 18px; margin-bottom:18px;
+        display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .dist b { font-size:.9rem; }
+  .dist select { background:#20242d; color:var(--fg); border:1px solid var(--bar); border-radius:7px; padding:6px 9px; font-size:.85rem; max-width:340px; }
+  .dist button { background:var(--orange); color:#241200; border:0; border-radius:8px; padding:8px 14px; font-weight:700; cursor:pointer; font-size:.85rem; }
+  .dist button:disabled { opacity:.5; cursor:default; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th, td { border-bottom:1px solid var(--bar); padding:10px 12px; text-align:left; }
+  th { color:var(--muted); font-weight:600; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; }
+  td .em { font-weight:600; } td .nm { color:var(--muted); font-size:.82rem; }
+  select.role { background:#20242d; color:var(--fg); border:1px solid var(--bar); border-radius:7px; padding:5px 8px; font-size:.85rem; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .chip { font-size:.68rem; padding:2px 7px; border-radius:20px; background:var(--bar); color:var(--muted); }
+  .chip.key { background:#13343a; color:var(--accent); }
+  .toggle { cursor:pointer; user-select:none; font-size:.85rem; }
+  .toggle.on { color:var(--ok); } .toggle.off { color:var(--danger); }
+  .toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%); background:var(--accent);
+        color:#04201f; padding:11px 20px; border-radius:30px; font-weight:700; opacity:0; transition:.3s; pointer-events:none; }
+  .toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>ROOMPULSE · ADMIN</h1>
+    <div class="links">
+      <select class="lang" id="lang"><option value="it">IT</option><option value="en">EN</option><option value="de">DE</option></select>
+      <a href="/edit" id="backlink">← editor</a>
+      <a href="#" id="logout">esci</a>
+    </div>
+  </div>
+  <div class="banner" id="banner"></div>
+  <div class="dist" id="dist"></div>
+  <table>
+    <thead><tr>
+      <th></th><th id="h-user"></th><th id="h-role"></th>
+      <th class="num" id="h-cost"></th><th class="num" id="h-tokens"></th>
+      <th id="h-active"></th><th id="h-created"></th>
+    </tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (s,r=document)=>r.querySelector(s);
+const SUPP = ["it","en","de"];
+let lang = localStorage.getItem("rp_lang") || (navigator.language||"it").slice(0,2);
+if (!SUPP.includes(lang)) lang = "it";
+let T = {};
+
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); }
+const money = (v) => "$" + (Number(v)||0).toFixed(4);
+const esc = (s) => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+
+async function initI18n() {
+  T = (await (await fetch("/api/i18n?lang="+lang)).json()).t;
+  document.documentElement.lang = lang;
+  $("#lang").value = lang;
+  $("#logout").textContent = T.logout;
+  $("#h-user").textContent = T.email + " / " + T.name;
+  $("#h-role").textContent = T.admin_role;
+  $("#h-cost").textContent = T.admin_cost;
+  $("#h-tokens").textContent = T.admin_tokens;
+  $("#h-active").textContent = T.admin_active;
+  $("#h-created").textContent = T.admin_created;
+}
+
+async function load() {
+  const res = await fetch("/api/admin/users");
+  if (res.status === 401) { location.href = "/login?next=/admin"; return; }
+  if (res.status === 403) { location.href = "/edit"; return; }
+  const d = await res.json();
+  $("#banner").innerHTML =
+    `<div><div class="lbl">${T.admin_total}</div><div class="big">${money(d.total_cost)}</div></div>
+     <div><div class="lbl">${T.admin_tokens}</div><div class="big">${(d.total_tokens||0).toLocaleString()}</div></div>
+     ${d.central_available ? "" : `<div class="warn">⚠️ ANTHROPIC_API_KEY ${T.admin_no_central}</div>`}`;
+  $("#rows").innerHTML = d.users.map(u => `
+    <tr data-id="${u.id}">
+      <td><input type="checkbox" class="selu" value="${u.id}" ${u.is_active?"":"disabled"}></td>
+      <td><div class="em">${esc(u.email)}</div><div class="nm">${esc(u.name||"")}</div></td>
+      <td><select class="role">
+        ${["free","full","admin"].map(r=>`<option value="${r}"${u.role===r?" selected":""}>${r}</option>`).join("")}
+      </select> ${u.role==="free"&&u.own_key?`<span class="chip key">key</span>`:""}</td>
+      <td class="num">${money(u.cost)}</td>
+      <td class="num">${(u.tokens||0).toLocaleString()}</td>
+      <td><span class="toggle ${u.is_active?"on":"off"}">${u.is_active?"● "+T.admin_active:"○"}</span></td>
+      <td class="nm">${(u.created_at||"").slice(0,10)}</td>
+    </tr>`).join("");
+  $("#rows").querySelectorAll("tr").forEach(tr => {
+    const id = tr.dataset.id;
+    tr.querySelector(".role").onchange = (e) => patch(id, {role: e.target.value});
+    tr.querySelector(".toggle").onclick = () => patch(id, {is_active: tr.querySelector(".toggle").classList.contains("off")});
+  });
+  // barra distribuzione: sorgente = deck dell'admin, destinatari = utenti spuntati
+  const decks = await (await fetch("/api/presentations")).json();
+  $("#dist").innerHTML = `<b>${T.distribute_deck}</b>
+    <select id="distsrc">${decks.map(p=>`<option value="${p.id}">${esc(p.title)} · ${p.n_slides} ${T.slides_word}</option>`).join("")}</select>
+    <button id="distbtn"${decks.length?"":" disabled"}>${T.distribute_btn}</button>`;
+  $("#distbtn").onclick = distribute;
+}
+
+async function distribute() {
+  const src = $("#distsrc").value;
+  const targets = [...$("#rows").querySelectorAll(".selu:checked")].map(c => c.value);
+  if (!src || !targets.length) { toast(T.distribute_none); return; }
+  const res = await fetch("/api/admin/distribute", {method:"POST",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify({source_pid:src, target_user_ids:targets})});
+  if (res.ok) { const d = await res.json(); toast(T.distributed + " " + d.distributed_to); load(); }
+  else { const e = await res.json().catch(()=>({})); toast(e.detail || "Errore"); }
+}
+
+async function patch(id, body) {
+  const res = await fetch(`/api/admin/users/${id}`, {method:"PATCH",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  if (res.ok) { toast(T.saved); load(); }
+  else { const e = await res.json().catch(()=>({})); toast(e.detail || "Errore"); load(); }
+}
+
+$("#lang").onchange = () => { localStorage.setItem("rp_lang", $("#lang").value); location.reload(); };
+$("#logout").onclick = async (e) => { e.preventDefault(); await fetch("/api/logout",{method:"POST"}); location.href="/login"; };
+
+initI18n().then(load);
+</script>
+</body>
+</html>

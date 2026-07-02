@@ -50,7 +50,7 @@ def _decode_token(token: str) -> str:
 def _lookup(uid: str):
     with db.get_conn() as conn:
         row = conn.execute(
-            "SELECT id, email, name FROM user WHERE id=? AND is_active=1", (uid,)
+            "SELECT id, email, name, role FROM user WHERE id=? AND is_active=1", (uid,)
         ).fetchone()
     return dict(row) if row else None
 

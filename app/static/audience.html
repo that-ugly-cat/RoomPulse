@@ -81,6 +81,18 @@
         background:var(--accent); color:#04201f; padding:11px 20px; border-radius:30px;
         font-weight:700; opacity:0; transition:.3s; pointer-events:none; }
   .toast.show { opacity:1; }
+  .connect { position:relative; display:flex; justify-content:space-between; gap:44px; }
+  .connect .clines { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; }
+  .ccol { display:flex; flex-direction:column; gap:10px; flex:1; z-index:1; min-width:0; }
+  .ccol.cright { align-items:stretch; }
+  .citem { padding:12px 14px; border:1px solid var(--bar); border-radius:11px; background:#20242d;
+        color:var(--fg); font-size:1rem; cursor:pointer; text-align:left; }
+  .citem.armed { border-color:var(--accent); background:#13343a; }
+  .citem.linked { border-color:var(--accent); }
+  table.cmx { border-collapse:collapse; width:100%; font-size:.82rem; }
+  table.cmx th, table.cmx td { border:1px solid var(--bar); padding:6px 8px; text-align:center; }
+  table.cmx th { color:var(--muted); font-weight:600; }
+  table.cmx th:first-child, table.cmx td:first-child { text-align:left; }
 </style>
 </head>
 <body>
@@ -269,6 +281,62 @@ function buildInput(s) {
       pad.onclick=place; pad.ontouchstart=(e)=>{e.preventDefault();place(e);};
     }, get:()=>pt};
   }
+  if (s.type === "connect") {
+    const Ls = c.left||[], Rs = c.right||[];
+    const one2one = (c.cardinality||"one-to-many") === "one-to-one";
+    const dir = c.direction || "ltr";
+    const html = `<p class="muted" style="margin:0 0 12px;font-size:.85rem">${T.connect_hint}</p>
+      <div class="connect" id="cw"><svg class="clines" id="clines"></svg>
+        <div class="ccol cleft">${Ls.map(o=>`<button class="citem" data-side="l" data-id="${o.id}">${o.label}</button>`).join("")}</div>
+        <div class="ccol cright">${Rs.map(o=>`<button class="citem" data-side="r" data-id="${o.id}">${o.label}</button>`).join("")}</div>
+      </div>`;
+    let links = [], armed = null;
+    const key = (l,r) => l+"|"+r;
+    return {html, multi:false, mount(){
+      const wrap=$("#cw"), svg=$("#clines");
+      const chip=(side,id)=>wrap.querySelector(`.citem[data-side="${side}"][data-id="${CSS.escape(id)}"]`);
+      function draw(){
+        const wr=wrap.getBoundingClientRect();
+        svg.setAttribute("viewBox",`0 0 ${wr.width} ${wr.height}`);
+        const defs = dir==="undirected" ? "" : `<defs><marker id="car" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--accent)"/></marker></defs>`;
+        let out="";
+        for(const [l,r] of links){
+          const a=chip("l",l), b=chip("r",r); if(!a||!b) continue;
+          const ar=a.getBoundingClientRect(), br=b.getBoundingClientRect();
+          const x1=ar.right-wr.left, y1=ar.top-wr.top+ar.height/2;
+          const x2=br.left-wr.left, y2=br.top-wr.top+br.height/2;
+          const mk = dir==="undirected" ? "" : (dir==="rtl" ? 'marker-start="url(#car)"' : 'marker-end="url(#car)"');
+          out += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--accent)" stroke-width="2.5" ${mk}></line>`;
+        }
+        svg.innerHTML = defs + out;
+      }
+      function refresh(){
+        const used=new Set(); links.forEach(([l,r])=>{used.add("l"+l);used.add("r"+r);});
+        wrap.querySelectorAll(".citem").forEach(el=>{
+          el.classList.toggle("linked", used.has(el.dataset.side+el.dataset.id));
+          el.classList.toggle("armed", !!armed && armed.side===el.dataset.side && armed.id===el.dataset.id);
+        });
+        draw(); links.length?enable():disable();
+      }
+      function toggle(l,r){
+        const k=key(l,r);
+        if(links.some(([a,b])=>key(a,b)===k)){ links=links.filter(([a,b])=>key(a,b)!==k); return; }
+        if(one2one) links=links.filter(([a,b])=>a!==l && b!==r);   // 1:1 → libera gli estremi
+        links.push([l,r]);
+      }
+      wrap.querySelectorAll(".citem").forEach(el=>el.onclick=()=>{
+        const side=el.dataset.side, id=el.dataset.id;
+        if(armed && armed.side!==side){
+          const l = side==="l"?id:armed.id, r = side==="r"?id:armed.id;
+          toggle(l,r); armed=null;
+        } else if(armed && armed.side===side && armed.id===id){ armed=null; }
+        else { armed={side,id}; }
+        refresh();
+      });
+      window.addEventListener("resize", draw);
+      setTimeout(refresh, 40);   // layout iniziale assestato
+    }, get:()=> links.length ? {links: links.map(([l,r])=>[l,r])} : null};
+  }
   return {html:`<p class="muted">${T.unsupported_type}</p>`, multi:false, mount(){}, get:()=>null};
 }
 
@@ -424,6 +492,8 @@ function renderResults(data) {
     body=(r.items||[]).map(it=>`<div class="rk">${r.type==="argpoll"
       ?`<div><b>${it.claim}</b><br><span class="muted">${it.justification}</span></div>`
       :`<div>${it.text}</div>`}</div>`).join("") || `<p class="muted">${T.no_answers}</p>`;
+  } else if (r.type === "connect") {
+    body = connectMatrix(r);
   } else { body = `<p class="muted">${r.n||0} risposte.</p>`; }
   root.innerHTML = `<div class="card"><p class="q">${data.slide.question}</p>${body}</div>
     <p class="code">${T.code_label} ${code}</p>`;
@@ -481,6 +551,15 @@ function renderComparison(post, pair) {
       <p class="meta">${T.shift_word}: <b style="color:var(--accent)">${deltas}</b> · ${pre.n} (PRE) · ${post.n} (POST)</p>`;
   }
   return body;
+}
+
+function connectMatrix(r) {
+  if (!r.left.length || !r.right.length || !r.n) return `<p class="muted">${T.no_answers}</p>`;
+  const max = Math.max(1, r.max||1);
+  const head = `<tr><th></th>${r.right.map(c=>`<th>${c.label}</th>`).join("")}</tr>`;
+  const body = r.matrix.map((row,i)=>`<tr><th>${r.left[i].label}</th>${
+    row.map(v=>`<td style="background:rgba(22,163,171,${v?(0.15+0.6*v/max).toFixed(2):0})">${v||""}</td>`).join("")}</tr>`).join("");
+  return `<table class="cmx">${head}${body}</table><p class="muted" style="margin-top:8px">${r.n} ${T.votes}</p>`;
 }
 
 function bar(name, count, max, correct) {

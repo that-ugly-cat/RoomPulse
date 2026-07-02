@@ -86,7 +86,7 @@ def _parse(text: str) -> dict:
     return data
 
 
-def _call(api_key: str, system: str, user_msg: str) -> dict:
+def _call(api_key: str, system: str, user_msg: str):
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -95,16 +95,20 @@ def _call(api_key: str, system: str, user_msg: str) -> dict:
         messages=[{"role": "user", "content": user_msg}],
     )
     text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text")
-    return _parse(text)
+    usage = {
+        "input": getattr(msg.usage, "input_tokens", 0),
+        "output": getattr(msg.usage, "output_tokens", 0),
+    }
+    return _parse(text), usage
 
 
-def cluster_argpoll(api_key: str, question: str, pairs: list) -> dict:
-    """pairs: [{n, claim, justification}]. Return {claim_clusters, arg_clusters, assignments}."""
+def cluster_argpoll(api_key: str, question: str, pairs: list):
+    """pairs: [{n, claim, justification}]. Return (result, usage)."""
     return _call(api_key, SYSTEM, _build_user_msg(question, pairs))
 
 
-def cluster_opentext(api_key: str, question: str, texts: list) -> dict:
-    """texts: [{n, text}]. Return {clusters, assignments}."""
-    data = _call(api_key, SYSTEM_OPENTEXT, _build_opentext_msg(question, texts))
+def cluster_opentext(api_key: str, question: str, texts: list):
+    """texts: [{n, text}]. Return (result, usage)."""
+    data, usage = _call(api_key, SYSTEM_OPENTEXT, _build_opentext_msg(question, texts))
     data.setdefault("clusters", [])
-    return data
+    return data, usage

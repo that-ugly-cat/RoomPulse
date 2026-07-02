@@ -283,6 +283,10 @@ function renderResults(r) {
     return r.groups.map(g=>bar(g.name, g.count, max)).join("")
       + `<p class="meta">${r.n} ${T.responses_word}</p>`;
   }
+  if (r.type === "connect") {
+    if (!r.n) return `<p class="meta">${T.waiting_responses}</p>`;
+    return connectMatrix(r) + connectBipartite(r) + `<p class="meta">${r.n} ${T.responses_word}</p>`;
+  }
   if (r.type === "donut") {
     const lb = r.leaderboard || [];
     if (!lb.length) return `<p class="meta">${T.waiting_responses}</p>`;
@@ -368,6 +372,31 @@ function renderModeration(items) {
       headers:{"Content-Type":"application/json"}, body:JSON.stringify({status:b.dataset.to})});
     load();
   });
+}
+
+function connectMatrix(r) {
+  if (!r.left.length || !r.right.length) return "";
+  const max = Math.max(1, r.max||1);
+  const head = `<tr><th></th>${r.right.map(c=>`<th>${c.label}</th>`).join("")}</tr>`;
+  const body = r.matrix.map((row,i)=>`<tr><th>${r.left[i].label}</th>${
+    row.map(v=>`<td style="background:rgba(22,163,171,${v?(0.15+0.6*v/max).toFixed(2):0})">${v||""}</td>`).join("")}</tr>`).join("");
+  return `<table class="cmatrix">${head}${body}</table>`;
+}
+
+function connectBipartite(r) {
+  const L=r.left, R=r.right; if (!L.length || !R.length) return "";
+  const max=Math.max(1, r.max||1), W=560, H=Math.max(L.length,R.length)*44+20, lx=160, rx=W-160;
+  const yy=(i,n)=> n>1 ? 20 + i*(H-40)/(n-1) : H/2;
+  let edges="";
+  r.matrix.forEach((row,i)=>row.forEach((v,j)=>{ if(!v) return;
+    const mk = r.direction==="undirected" ? "" : (r.direction==="rtl" ? 'marker-start="url(#bar)"' : 'marker-end="url(#bar)"');
+    edges += `<line x1="${lx}" y1="${yy(i,L.length).toFixed(1)}" x2="${rx}" y2="${yy(j,R.length).toFixed(1)}" stroke="var(--accent)" stroke-width="${(1+6*v/max).toFixed(1)}" opacity="${(0.3+0.6*v/max).toFixed(2)}" ${mk}/>`;
+  }));
+  const nodesL = L.map((o,i)=>`<text x="10" y="${(yy(i,L.length)+4).toFixed(1)}" fill="var(--fg)" font-size="13">${o.label}</text>`).join("");
+  const nodesR = R.map((o,i)=>`<text x="${W-10}" y="${(yy(i,R.length)+4).toFixed(1)}" fill="var(--fg)" font-size="13" text-anchor="end">${o.label}</text>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;margin-top:14px">
+    <defs><marker id="bar" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="var(--accent)"/></marker></defs>
+    ${edges}${nodesL}${nodesR}</svg>`;
 }
 
 function matrixHtml(r) {

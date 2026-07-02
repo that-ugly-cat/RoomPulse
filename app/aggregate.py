@@ -212,6 +212,38 @@ def _donut(config, rows):
     }
 
 
+def _connect(config, rows):
+    """Mapping: conteggio per coppia (left,right) → matrice left×right."""
+    left = config.get("left", [])
+    right = config.get("right", [])
+    li = {o["id"]: i for i, o in enumerate(left)}
+    ri = {o["id"]: i for i, o in enumerate(right)}
+    matrix = [[0] * len(right) for _ in left]
+    n = 0
+    for p in _payloads(rows):
+        links = p.get("links", [])
+        if links:
+            n += 1
+        seen = set()
+        for pair in links:
+            if isinstance(pair, list) and len(pair) == 2:
+                l, r = pair
+                if l in li and r in ri and (l, r) not in seen:
+                    seen.add((l, r))
+                    matrix[li[l]][ri[r]] += 1
+    mx = max((c for row in matrix for c in row), default=0)
+    return {
+        "type": "connect",
+        "n": n,
+        "left": [{"id": o["id"], "label": o["label"]} for o in left],
+        "right": [{"id": o["id"], "label": o["label"]} for o in right],
+        "matrix": matrix,
+        "max": mx,
+        "cardinality": config.get("cardinality", "one-to-many"),
+        "direction": config.get("direction", "ltr"),
+    }
+
+
 _DISPATCH = {
     "mc": _mc,
     "scale": _scale,
@@ -222,11 +254,12 @@ _DISPATCH = {
     "opentext": _opentext,
     "argpoll": _argpoll,
     "groups": _groups,
+    "connect": _connect,
     "donut": _donut,
 }
 
 # Voto singolo → upsert per (run, slide, token). Gli altri ammettono più invii.
-SINGLE_VOTE_TYPES = {"mc", "scale", "quadrant", "ranking", "points"}
+SINGLE_VOTE_TYPES = {"mc", "scale", "quadrant", "ranking", "points", "connect"}
 
 # Tipi testuali che passano per la coda di moderazione presenter-side.
 MODERATED_TYPES = {"opentext", "argpoll", "qa"}

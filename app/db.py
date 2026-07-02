@@ -89,7 +89,21 @@ CREATE TABLE IF NOT EXISTS user (
     password_hash TEXT NOT NULL,
     name          TEXT,
     is_active     INTEGER NOT NULL DEFAULT 1,
-    api_key       TEXT,                   -- chiave API Claude per-utente (clustering)
+    api_key       TEXT,                   -- chiave API Claude per-utente (tier free)
+    role          TEXT NOT NULL DEFAULT 'free',  -- free | full | admin
+    created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS usage_log (
+    id            TEXT PRIMARY KEY,       -- consumo chiave centrale (tier full/admin), per cost tracking
+    user_id       TEXT NOT NULL,
+    run_id        TEXT,
+    slide_id      TEXT,
+    kind          TEXT,                   -- argpoll | opentext
+    model         TEXT NOT NULL,
+    input_tokens  INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    cost_usd      REAL NOT NULL,
     created_at    TEXT NOT NULL
 );
 
@@ -111,6 +125,7 @@ _MIGRATIONS = [
     "ALTER TABLE response ADD COLUMN arg_cluster_id TEXT",
     "ALTER TABLE response ADD COLUMN cluster_id TEXT",  # clustering a un asse (open text)
     "ALTER TABLE slide ADD COLUMN presenter_notes TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE user ADD COLUMN role TEXT NOT NULL DEFAULT 'free'",
 ]
 
 

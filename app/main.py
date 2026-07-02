@@ -27,7 +27,23 @@ from app.aggregate import aggregate, SINGLE_VOTE_TYPES, MODERATED_TYPES
 # dependency riusabile per le rotte presenter (alza 401 se non autenticato)
 CurrentUser = Depends(auth.get_current_user)
 
+
+def _require_admin(user: dict = CurrentUser) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(403, "richiede privilegi admin")
+    return user
+
+
+AdminUser = Depends(_require_admin)
+
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+# ── Tier / API centralizzata ─────────────────────────────────────────────────
+CENTRAL_API_KEY = os.environ.get("ANTHROPIC_API_KEY")   # chiave del server per i tier full/admin
+# prezzi Sonnet (USD per 1M token), sovrascrivibili da env; solo per il tracking (niente blocco)
+PRICE_IN = float(os.environ.get("RP_PRICE_IN_PER_MTOK", "3.0"))
+PRICE_OUT = float(os.environ.get("RP_PRICE_OUT_PER_MTOK", "15.0"))
+RP_ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get("RP_ADMIN_EMAILS", "").split(",") if e.strip()]
 
 app = FastAPI(title="RoomPulse")
 
@@ -35,6 +51,10 @@ app = FastAPI(title="RoomPulse")
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    if RP_ADMIN_EMAILS:  # promuove ad admin gli account elencati in env (bootstrap del primo admin)
+        with db.get_conn() as conn:
+            for em in RP_ADMIN_EMAILS:
+                conn.execute("UPDATE user SET role='admin' WHERE email=?", (em,))
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -60,6 +80,16 @@ def editor_page(session: str | None = Cookie(default=None)):
     if not auth.get_user_or_none(session):
         return RedirectResponse("/login")
     return FileResponse(STATIC_DIR / "editor.html")
+
+
+@app.get("/admin")
+def admin_page(session: str | None = Cookie(default=None)):
+    u = auth.get_user_or_none(session)
+    if not u:
+        return RedirectResponse("/login")
+    if u.get("role") != "admin":
+        return RedirectResponse("/edit")
+    return FileResponse(STATIC_DIR / "admin.html")
 
 
 @app.get("/login")
@@ -105,11 +135,12 @@ def register(body: RegisterIn, response: Response):
         if conn.execute("SELECT 1 FROM user WHERE email=?", (email,)).fetchone():
             raise HTTPException(409, "email già registrata")
         uid = db.new_id()
+        role = "admin" if email in RP_ADMIN_EMAILS else "free"
         conn.execute(
-            "INSERT INTO user (id, email, password_hash, name, is_active, created_at) "
-            "VALUES (?,?,?,?,1,?)",
+            "INSERT INTO user (id, email, password_hash, name, is_active, role, created_at) "
+            "VALUES (?,?,?,?,1,?,?)",
             (uid, email, auth.hash_password(body.password),
-             body.name.strip() or email.split("@")[0], db.now_iso()),
+             body.name.strip() or email.split("@")[0], role, db.now_iso()),
         )
     token = auth.create_token(uid)
     response.set_cookie(
@@ -146,7 +177,10 @@ def me(user: dict = CurrentUser):
     key = row["api_key"] if row else None
     # non rivelo la chiave: solo se c'è e gli ultimi 4 char
     masked = ("…" + key[-4:]) if key else None
-    return {"email": user["email"], "name": user["name"], "api_key_set": bool(key), "api_key_hint": masked}
+    role = user.get("role", "free")
+    return {"email": user["email"], "name": user["name"], "role": role,
+            "uses_central": role in ("full", "admin"), "central_available": bool(CENTRAL_API_KEY),
+            "api_key_set": bool(key), "api_key_hint": masked}
 
 
 class ApiKeyIn(BaseModel):
@@ -159,6 +193,104 @@ def set_api_key(body: ApiKeyIn, user: dict = CurrentUser):
     with db.get_conn() as conn:
         conn.execute("UPDATE user SET api_key=? WHERE id=?", (key or None, user["id"]))
     return {"ok": True, "api_key_set": bool(key)}
+
+
+# ── Admin: gestione utenti + costi ───────────────────────────────────────────
+@app.get("/api/admin/users")
+def admin_users(user: dict = AdminUser):
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT u.id, u.email, u.name, u.role, u.is_active, u.created_at, "
+            "  (u.api_key IS NOT NULL) AS own_key, "
+            "  COALESCE((SELECT SUM(cost_usd) FROM usage_log WHERE user_id=u.id),0) AS cost, "
+            "  COALESCE((SELECT SUM(input_tokens+output_tokens) FROM usage_log WHERE user_id=u.id),0) AS tokens "
+            "FROM user u ORDER BY u.created_at DESC"
+        ).fetchall()
+        tot = conn.execute(
+            "SELECT COALESCE(SUM(cost_usd),0) AS c, COALESCE(SUM(input_tokens+output_tokens),0) AS t FROM usage_log"
+        ).fetchone()
+    return {"users": [dict(r) for r in rows], "total_cost": tot["c"], "total_tokens": tot["t"],
+            "central_available": bool(CENTRAL_API_KEY)}
+
+
+class AdminUserPatch(BaseModel):
+    role: str | None = None
+    is_active: bool | None = None
+
+
+@app.patch("/api/admin/users/{uid}")
+def admin_set_user(uid: str, body: AdminUserPatch, user: dict = AdminUser):
+    with db.get_conn() as conn:
+        target = conn.execute("SELECT id, role FROM user WHERE id=?", (uid,)).fetchone()
+        if not target:
+            raise HTTPException(404, "utente non trovato")
+
+        def _last_admin_guard():
+            n = conn.execute(
+                "SELECT COUNT(*) AS c FROM user WHERE role='admin' AND is_active=1"
+            ).fetchone()["c"]
+            if n <= 1:
+                raise HTTPException(400, "non puoi rimuovere/disattivare l'ultimo admin")
+
+        if body.role is not None:
+            if body.role not in ("free", "full", "admin"):
+                raise HTTPException(400, "ruolo non valido")
+            if target["role"] == "admin" and body.role != "admin":
+                _last_admin_guard()
+            conn.execute("UPDATE user SET role=? WHERE id=?", (body.role, uid))
+        if body.is_active is not None:
+            if target["role"] == "admin" and not body.is_active:
+                _last_admin_guard()
+            conn.execute("UPDATE user SET is_active=? WHERE id=?", (1 if body.is_active else 0, uid))
+        return {"ok": True}
+
+
+def _clone_presentation(conn, source_pid: str, owner: str) -> str:
+    """Duplica una deck (slide + config + note + pair, niente run) in un nuovo account."""
+    src = conn.execute("SELECT * FROM presentation WHERE id=?", (source_pid,)).fetchone()
+    slides = conn.execute(
+        "SELECT * FROM slide WHERE presentation_id=? ORDER BY ord", (source_pid,)
+    ).fetchall()
+    new_pid = db.new_id()
+    conn.execute(
+        "INSERT INTO presentation (id, title, owner, join_code, created_at) VALUES (?,?,?,?,?)",
+        (new_pid, src["title"], owner, db.new_join_code(conn), db.now_iso()),
+    )
+    idmap: dict = {}
+    for s in slides:
+        nid = db.new_id()
+        conn.execute(
+            "INSERT INTO slide (id, presentation_id, ord, type, question, config, presenter_notes) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (nid, new_pid, s["ord"], s["type"], s["question"], s["config"], s["presenter_notes"]),
+        )
+        idmap[s["id"]] = nid
+    for s in slides:  # remap pre/post ai nuovi id
+        if s["pair_id"] and s["pair_id"] in idmap:
+            conn.execute("UPDATE slide SET pair_id=? WHERE id=?", (idmap[s["pair_id"]], idmap[s["id"]]))
+    return new_pid
+
+
+class DistributeIn(BaseModel):
+    source_pid: str
+    target_user_ids: list[str]
+
+
+@app.post("/api/admin/distribute")
+def admin_distribute(body: DistributeIn, user: dict = AdminUser):
+    """Clona una deck dell'admin negli account degli utenti scelti (per chi non sa importare un JSON)."""
+    with db.get_conn() as conn:
+        src = conn.execute("SELECT owner FROM presentation WHERE id=?", (body.source_pid,)).fetchone()
+        if not src:
+            raise HTTPException(404, "deck sorgente non trovata")
+        if src["owner"] != user["id"]:
+            raise HTTPException(403, "puoi distribuire solo deck che possiedi")
+        n = 0
+        for uid in body.target_user_ids:
+            if conn.execute("SELECT 1 FROM user WHERE id=? AND is_active=1", (uid,)).fetchone():
+                _clone_presentation(conn, body.source_pid, uid)
+                n += 1
+        return {"ok": True, "distributed_to": n}
 
 
 @app.get("/api/i18n")
@@ -1329,15 +1461,35 @@ class ClusterIn(BaseModel):
     slide_id: str
 
 
+def _record_usage(conn, user_id: str, run_id: str, slide_id: str, kind: str, usage: dict) -> None:
+    """Registra il consumo della chiave centrale in usage_log, con costo stimato (prezzi Sonnet)."""
+    it = int(usage.get("input", 0))
+    ot = int(usage.get("output", 0))
+    cost = it / 1_000_000 * PRICE_IN + ot / 1_000_000 * PRICE_OUT
+    conn.execute(
+        "INSERT INTO usage_log (id, user_id, run_id, slide_id, kind, model, "
+        "input_tokens, output_tokens, cost_usd, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (db.new_id(), user_id, run_id, slide_id, kind, clustering.MODEL, it, ot, cost, db.now_iso()),
+    )
+
+
 @app.post("/api/runs/{rid}/cluster")
 def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
-    """Clusterizza (LLM) le risposte argpoll/opentext del run. Usa la chiave API dell'utente."""
+    """Clusterizza (LLM) le risposte argpoll/opentext del run.
+    Tier free → chiave dell'utente; tier full/admin → chiave centrale del server (con cost tracking)."""
     with db.get_conn() as conn:
         _check_owner(conn, _pid_of_run(conn, rid), user)
-        row = conn.execute("SELECT api_key FROM user WHERE id=?", (user["id"],)).fetchone()
-        key = row["api_key"] if row else None
-        if not key:
-            raise HTTPException(400, "API key non configurata")
+        role = user.get("role", "free")
+        central = role in ("full", "admin")
+        if central:
+            key = CENTRAL_API_KEY
+            if not key:
+                raise HTTPException(503, "chiave API centrale non configurata sul server")
+        else:  # free: chiave propria
+            row = conn.execute("SELECT api_key FROM user WHERE id=?", (user["id"],)).fetchone()
+            key = row["api_key"] if row else None
+            if not key:
+                raise HTTPException(400, "API key non configurata")
         slide = conn.execute("SELECT * FROM slide WHERE id=?", (body.slide_id,)).fetchone()
         if not slide or slide["type"] not in ("argpoll", "opentext"):
             raise HTTPException(404, "slide non valida")
@@ -1355,14 +1507,16 @@ def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
                 for i, r in enumerate(rows, start=1):
                     p = json.loads(r["payload"])
                     pairs.append({"n": i, "claim": p.get("claim", ""), "justification": p.get("justification", "")})
-                result = clustering.cluster_argpoll(key, question, pairs)
+                result, usage = clustering.cluster_argpoll(key, question, pairs)
             else:  # opentext
                 texts = []
                 for i, r in enumerate(rows, start=1):
                     texts.append({"n": i, "text": json.loads(r["payload"]).get("text", "")})
-                result = clustering.cluster_opentext(key, question, texts)
+                result, usage = clustering.cluster_opentext(key, question, texts)
         except Exception as e:  # errore LLM / chiave / parsing
             raise HTTPException(502, f"clustering fallito: {e}")
+        if central:  # traccia il consumo della chiave centrale (cost tracking per-utente)
+            _record_usage(conn, user["id"], rid, body.slide_id, slide["type"], usage)
         if slide["type"] == "argpoll":
             _materialize_clusters(conn, rid, body.slide_id, result)
             return _argpoll_clustered(conn, rid, body.slide_id)

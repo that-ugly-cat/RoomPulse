@@ -66,7 +66,7 @@
 <body>
 <div class="grid">
   <aside class="side">
-    <h1>ROOMPULSE · EDITOR <a href="#" id="logout" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0">esci</a><a href="#" id="settingsbtn" title="settings" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0;margin-right:10px">⚙</a><a href="/guide" target="_blank" id="guidelink" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0;margin-right:10px">📖</a></h1>
+    <h1>ROOMPULSE · EDITOR <a href="#" id="logout" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0">esci</a><a href="#" id="settingsbtn" title="settings" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0;margin-right:10px">⚙</a><a href="/guide" target="_blank" id="guidelink" style="float:right;color:var(--muted);font-weight:400;letter-spacing:0;margin-right:10px">📖</a><a href="/admin" id="adminlink" style="display:none;float:right;color:#e8862e;font-weight:600;letter-spacing:0;margin-right:10px">🛡</a></h1>
     <select id="lang" style="background:#20242d;color:var(--muted);border:1px solid var(--bar);border-radius:8px;padding:4px 7px;font-size:.8rem;margin-bottom:8px">
       <option value="it">IT</option><option value="en">EN</option><option value="de">DE</option></select>
     <div class="row"><input id="newtitle" placeholder="Titolo nuova deck">
@@ -104,7 +104,7 @@
 
 <script>
 const $ = (s,r=document)=>r.querySelector(s);
-const TYPES = ["mc","scale","wordcloud","quadrant","ranking","points","opentext","qa","argpoll","groups","donut"];
+const TYPES = ["mc","scale","wordcloud","quadrant","ranking","points","opentext","qa","argpoll","groups","connect","donut"];
 let presentations = [];
 let current = null;   // dettaglio presentation selezionata
 let editingId = null; // id slide in modifica (null = modalità aggiunta)
@@ -123,6 +123,10 @@ async function initI18n() {
   $("#logout").textContent = T.logout;
   $("#guidelink").textContent = "📖 " + T.user_guide;
   $("#guidelink").title = T.user_guide;
+  try {
+    const me = await (await fetch("/api/me")).json();
+    if (me.role === "admin") { const a = $("#adminlink"); a.style.display = ""; a.textContent = "🛡 " + T.admin_panel; a.title = T.admin_panel; }
+  } catch {}
   $("#importbtn").textContent = T.import_deck;
   $("#newtitle").placeholder = T.new_deck_ph;
   if ($("#placeholder")) $("#placeholder").textContent = T.pick_deck;
@@ -264,6 +268,10 @@ function slideConfigHtml(s) {
     rows.push(chips(T.groups_label, (c.groups||[]).map(g=>g.name)));
   } else if (s.type === "argpoll") {
     rows.push(`<div class="cfgrow muted">${c.claim_label||T.claim_default} / ${c.justification_label||T.just_default}</div>`);
+  } else if (s.type === "connect") {
+    rows.push(chips(T.connect_left, (c.left||[]).map(o=>o.label)));
+    rows.push(chips(T.connect_right, (c.right||[]).map(o=>o.label)));
+    rows.push(`<div class="cfgrow muted">${c.cardinality||""} · ${c.direction||""}</div>`);
   } else {
     rows.push(`<div class="cfgrow muted">${T.no_config}</div>`);
   }
@@ -475,6 +483,7 @@ function wireList(holderId, initial) {
   return () => [...holder.querySelectorAll("input")].map(i=>i.value.trim()).filter(Boolean);
 }
 let getItems = null;
+let getLeft = null, getRight = null;   // per il tipo connect (due liste)
 
 function mcOptsInit(pre) {
   const addRow = (label="", correct=false) => {
@@ -544,6 +553,16 @@ function renderCfg(pre) {
       <label>${T.just_field_label}</label><input id="ajl" placeholder="${T.just_field_ph}">`;
     if (pre) { v("#acl", pre.claim_label || ""); v("#ajl", pre.justification_label || ""); }
   }
+  else if (t === "connect") {
+    box.innerHTML = listEditor(T.connect_left, "optsL") + listEditor(T.connect_right, "optsR") +
+      `<label>${T.connect_cardinality}</label>
+       <select id="ccard"><option value="one-to-one">${T.card_one_one}</option><option value="one-to-many">${T.card_one_many}</option></select>
+       <label>${T.connect_direction}</label>
+       <select id="cdir"><option value="ltr">${T.dir_ltr}</option><option value="rtl">${T.dir_rtl}</option><option value="undirected">${T.dir_none}</option></select>`;
+    getLeft = wireList("optsL", (pre && pre.left || []).map(o => o.label));
+    getRight = wireList("optsR", (pre && pre.right || []).map(o => o.label));
+    if (pre) { v("#ccard", pre.cardinality || "one-to-many"); v("#cdir", pre.direction || "ltr"); }
+  }
   else { box.innerHTML = `<p class="muted">${T.no_config}</p>`; }
 }
 
@@ -571,6 +590,11 @@ function buildConfig(t) {
   if (t === "quadrant") return {labels:{x_left:$("#qxl").value, x_right:$("#qxr").value,
                                         y_top:$("#qyt").value, y_bottom:$("#qyb").value}};
   if (t === "argpoll") return {claim_label:$("#acl").value, justification_label:$("#ajl").value};
+  if (t === "connect") return {
+    left: getLeft().map((l,i)=>({id:"l"+i, label:l})),
+    right: getRight().map((l,i)=>({id:"r"+i, label:l})),
+    cardinality: $("#ccard").value, direction: $("#cdir").value,
+  };
   return {};
 }
 
