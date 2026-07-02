@@ -566,6 +566,59 @@ def add_slide(pid: str, body: SlideIn, user: dict = CurrentUser):
         return {"id": sid, "ord": ord_row["n"]}
 
 
+class SlideEdit(BaseModel):
+    edit_structure: bool = False       # False → aggiorna solo le note (tier "sempre"); True → struttura (gated)
+    question: str | None = None
+    config: dict | None = None
+    pair_id: str | None = None         # con edit_structure=True: None = scollega la coppia
+    presenter_notes: str | None = None
+
+
+@app.patch("/api/slides/{slide_id}")
+def edit_slide(slide_id: str, body: SlideEdit, user: dict = CurrentUser):
+    """Modifica una slide. Le note sono sempre editabili; domanda/config/pair solo se la slide
+    non ha ancora risposte (gate per-slide, lato server)."""
+    with db.get_conn() as conn:
+        pid = _pid_of_slide(conn, slide_id)
+        _check_owner(conn, pid, user)
+        slide = conn.execute("SELECT * FROM slide WHERE id=?", (slide_id,)).fetchone()
+
+        if not body.edit_structure:
+            # tier "sempre": solo presenter notes, nessun gate
+            if body.presenter_notes is not None:
+                conn.execute(
+                    "UPDATE slide SET presenter_notes=? WHERE id=?",
+                    (body.presenter_notes, slide_id),
+                )
+            return {"ok": True, "scope": "notes"}
+
+        # tier strutturale: vietato se la slide ha risposte
+        if conn.execute(
+            "SELECT 1 FROM response WHERE slide_id=? LIMIT 1", (slide_id,)
+        ).fetchone():
+            raise HTTPException(409, "la slide ha già risposte: modifica strutturale non permessa")
+
+        pair = body.pair_id or None
+        if pair:
+            if pair == slide_id:
+                raise HTTPException(400, "una slide non può essere POST di se stessa")
+            tgt = conn.execute(
+                "SELECT type FROM slide WHERE id=? AND presentation_id=?", (pair, pid)
+            ).fetchone()
+            if not tgt or slide["type"] not in ("scale", "mc", "quadrant") or tgt["type"] != slide["type"]:
+                raise HTTPException(
+                    400, "pre/post consentito solo tra slide dello stesso tipo (scale/mc/quadrant)"
+                )
+        q = body.question if body.question is not None else slide["question"]
+        cfg = json.dumps(body.config) if body.config is not None else slide["config"]
+        notes = body.presenter_notes if body.presenter_notes is not None else slide["presenter_notes"]
+        conn.execute(
+            "UPDATE slide SET question=?, config=?, pair_id=?, presenter_notes=? WHERE id=?",
+            (q, cfg, pair, notes, slide_id),
+        )
+        return {"ok": True, "scope": "full"}
+
+
 class RunIn(BaseModel):
     label: str | None = None
 
@@ -668,12 +721,24 @@ def presenter_view(pid: str, user: dict = CurrentUser):
         slides = conn.execute(
             "SELECT * FROM slide WHERE presentation_id=? ORDER BY ord", (pid,)
         ).fetchall()
+        responded = {
+            r["slide_id"] for r in conn.execute(
+                "SELECT DISTINCT slide_id FROM response "
+                "WHERE run_id IN (SELECT id FROM run WHERE presentation_id=?)", (pid,)
+            ).fetchall()
+        }
+
+        def _sd(s):
+            d = _slide_dict(s)
+            d["has_responses"] = s["id"] in responded  # gate editing strutturale (per-slide)
+            return d
+
         out = {
             "id": pres["id"],
             "title": pres["title"],
             "join_code": pres["join_code"],
             "active_run_id": pres["active_run_id"],
-            "slides": [_slide_dict(s) for s in slides],
+            "slides": [_sd(s) for s in slides],
             "run": None,
         }
         rid = pres["active_run_id"]

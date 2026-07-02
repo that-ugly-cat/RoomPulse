@@ -175,6 +175,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "purged_toast":      "Run eliminati",
         "presenter_notes_label": "Note del presentatore (opzionale)",
         "presenter_notes_ph":    "Visibili solo a te durante la presentazione…",
+        "saved":             "Salvato ✓",
+        "edit_slide":        "Modifica slide",
+        "edit_locked_hint":  "Questa slide ha già risposte: puoi modificare solo le note.",
     },
     "en": {
         "code_label":        "code",
@@ -336,6 +339,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "purged_toast":      "Runs purged",
         "presenter_notes_label": "Presenter's notes (optional)",
         "presenter_notes_ph":    "Visible only to you while presenting…",
+        "saved":             "Saved ✓",
+        "edit_slide":        "Edit slide",
+        "edit_locked_hint":  "This slide already has responses — you can only edit the notes.",
     },
     "de": {
         "code_label":        "Code",
@@ -497,6 +503,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "purged_toast":      "Läufe gelöscht",
         "presenter_notes_label": "Moderatoren-Notizen (optional)",
         "presenter_notes_ph":    "Nur für dich während der Präsentation sichtbar…",
+        "saved":             "Gespeichert ✓",
+        "edit_slide":        "Folie bearbeiten",
+        "edit_locked_hint":  "Diese Folie hat bereits Antworten — nur die Notizen sind bearbeitbar.",
     },
 }
 

@@ -48,6 +48,7 @@
   .links a { color:var(--accent); }
   .opt-row { display:flex; gap:6px; margin:4px 0; }
   .opt-row input { margin:0; }
+  .notes-edit { margin-top:10px; padding-top:10px; border-top:1px solid var(--bar); }
   .muted { color:var(--muted); }
   .card { background:var(--card); border-radius:12px; padding:18px; margin-top:14px; }
   .overlay { position:fixed; inset:0; background:rgba(0,0,0,.65); display:none;
@@ -106,6 +107,9 @@ const $ = (s,r=document)=>r.querySelector(s);
 const TYPES = ["mc","scale","wordcloud","quadrant","ranking","points","opentext","qa","argpoll","groups","donut"];
 let presentations = [];
 let current = null;   // dettaglio presentation selezionata
+let editingId = null; // id slide in modifica (null = modalità aggiunta)
+const esc = (s) => String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;");
+function disableAll(el) { if (el) el.querySelectorAll("input,select,textarea,button").forEach(x => x.disabled = true); }
 
 // i18n
 const SUPP = ["it","en","de"];
@@ -186,13 +190,20 @@ function renderDeck() {
         <span class="t">${s.ord}. ${T["type_"+s.type]||s.type}</span>
         <span class="qx">${s.question}</span>
         <span class="chev">▸</span>
+        <button class="sm" data-edit="${s.id}" title="${T.edit_slide}">✎</button>
         <button class="danger sm" data-del="${s.id}">${T.delete}</button>
       </div>
-      <div class="slide-body" style="display:none">${slideConfigHtml(s)}</div>
+      <div class="slide-body" style="display:none">${slideConfigHtml(s)}
+        <div class="notes-edit">
+          <label>📝 ${T.presenter_notes_label}</label>
+          <textarea class="ntext" rows="2" placeholder="${T.presenter_notes_ph}">${(s.presenter_notes||"").replace(/&/g,"&amp;").replace(/</g,"&lt;")}</textarea>
+          <button class="sm nsave" data-id="${s.id}">${T.save}</button>
+        </div>
+      </div>
     </div>`).join("") : `<p class="muted">${T.no_slides}</p>`;
   $("#slides").querySelectorAll(".slide-head").forEach(head => {
     head.onclick = (e) => {
-      if (e.target.closest("[data-del]") || e.target.classList.contains("dh")) return;
+      if (e.target.closest("[data-del]") || e.target.closest("[data-edit]") || e.target.classList.contains("dh")) return;
       const body = head.parentElement.querySelector(".slide-body");
       const open = body.style.display !== "none";
       body.style.display = open ? "none" : "block";
@@ -203,6 +214,20 @@ function renderDeck() {
     e.stopPropagation();
     await fetch(`/api/slides/${b.dataset.del}`, {method:"DELETE"});
     selectP(p.id);
+  });
+  $("#slides").querySelectorAll("[data-edit]").forEach(b => b.onclick = (e) => {
+    e.stopPropagation(); startEdit(b.dataset.edit);
+  });
+  $("#slides").querySelectorAll(".nsave").forEach(b => b.onclick = async (e) => {
+    e.stopPropagation();
+    const val = b.parentElement.querySelector(".ntext").value.trim();
+    const res = await fetch(`/api/slides/${b.dataset.id}`, {method:"PATCH",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({edit_structure:false, presenter_notes:val})});
+    if (res.ok) {
+      const s = current.slides.find(x => x.id === b.dataset.id); if (s) s.presenter_notes = val;
+      b.textContent = T.saved; setTimeout(() => { b.textContent = T.save; }, 1500);
+    } else { alert("Errore (HTTP " + res.status + ")"); }
   });
   wireSlideDrag(p.id);
   renderAddBox();
@@ -245,9 +270,6 @@ function slideConfigHtml(s) {
   if (s.pair_id) {
     const pre = current.slides.find(x => x.id === s.pair_id);
     rows.push(`<div class="cfgrow">↪ ${T.post_of} ${pre ? pre.ord+". "+pre.question : s.pair_id}</div>`);
-  }
-  if (s.presenter_notes) {
-    rows.push(`<div class="cfgrow"><b>📝 ${T.presenter_notes_label}:</b> <span class="muted">${s.presenter_notes}</span></div>`);
   }
   return rows.join("");
 }
@@ -369,32 +391,68 @@ function openDeleteDeck(id) {
   };
 }
 
+function startEdit(id) {
+  editingId = id; renderAddBox();
+  $("#addbox").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function renderAddBox() {
+  const ed = editingId ? current.slides.find(s => s.id === editingId) : null;
+  const locked = ed ? ed.has_responses : false;   // struttura bloccata se la slide ha risposte
   $("#addbox").innerHTML = `
-    <h2 style="margin-top:0">${T.add_slide}</h2>
+    <h2 style="margin-top:0">${ed ? T.edit_slide : T.add_slide}</h2>
+    ${ed && locked ? `<p class="muted" style="border-left:3px solid var(--orange);padding-left:10px">${T.edit_locked_hint}</p>` : ""}
     <label>${T.type_label}</label>
-    <select id="stype">${TYPES.map(t=>`<option value="${t}">${T["type_"+t]}</option>`).join("")}</select>
+    <select id="stype" ${ed ? "disabled" : ""}>${TYPES.map(t=>`<option value="${t}"${ed&&ed.type===t?" selected":""}>${T["type_"+t]}</option>`).join("")}</select>
     <label>${T.question_label}</label>
-    <textarea id="squestion" rows="2" placeholder="${T.question_ph}"></textarea>
+    <textarea id="squestion" rows="2" placeholder="${T.question_ph}">${ed ? esc(ed.question) : ""}</textarea>
     <div id="cfg"></div>
     <label>${T.presenter_notes_label}</label>
-    <textarea id="snotes" rows="2" placeholder="${T.presenter_notes_ph}"></textarea>
+    <textarea id="snotes" rows="2" placeholder="${T.presenter_notes_ph}">${ed ? esc(ed.presenter_notes) : ""}</textarea>
     <div id="pairbox"></div>
-    <button class="primary" id="addslide" style="margin-top:12px">${T.add}</button>`;
-  $("#stype").onchange = () => { renderCfg(); renderPairBox(); };
-  renderCfg(); renderPairBox();
-  $("#addslide").onclick = addSlide;
+    <button class="primary" id="addslide" style="margin-top:12px">${ed ? T.save : T.add}</button>
+    ${ed ? `<button class="sm" id="canceledit" style="margin-top:12px;margin-left:8px">${T.cancel}</button>` : ""}`;
+  if (!ed) $("#stype").onchange = () => { renderCfg(); renderPairBox(); };
+  renderCfg(ed ? ed.config : null);
+  renderPairBox(ed ? ed.pair_id : null);
+  if (ed && locked) {                       // solo le note restano editabili
+    $("#squestion").disabled = true;
+    disableAll($("#cfg"));
+    const ps = $("#pairsel"); if (ps) ps.disabled = true;
+  }
+  $("#addslide").onclick = ed ? saveEdit : addSlide;
+  if (ed) $("#canceledit").onclick = () => { editingId = null; renderAddBox(); };
+}
+
+async function saveEdit() {
+  const ed = current.slides.find(s => s.id === editingId);
+  const body = { presenter_notes: $("#snotes").value.trim() };
+  if (ed.has_responses) {
+    body.edit_structure = false;            // gated: solo note
+  } else {
+    body.edit_structure = true;
+    body.question = $("#squestion").value.trim();
+    if (!body.question) { alert(T.write_question_alert); return; }
+    body.config = buildConfig(ed.type);
+    const pairEl = $("#pairsel");
+    body.pair_id = pairEl ? (pairEl.value || null) : null;
+  }
+  const res = await fetch(`/api/slides/${editingId}`, {method:"PATCH",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  if (res.ok) { editingId = null; selectP(current.id); }
+  else { const e = await res.json().catch(()=>({})); alert(e.detail || ("Errore (HTTP " + res.status + ")")); }
 }
 
 const PREPOST_TYPES = ["scale","mc","quadrant"];
-function renderPairBox() {
+function renderPairBox(selected) {
   const t = $("#stype").value;
   const box = $("#pairbox");
-  const cands = current.slides.filter(s => s.type === t);   // solo stesso tipo
+  let cands = current.slides.filter(s => s.type === t);   // solo stesso tipo
+  if (editingId) cands = cands.filter(s => s.id !== editingId);   // niente auto-coppia
   if (!PREPOST_TYPES.includes(t) || !cands.length) { box.innerHTML = ""; return; }
   box.innerHTML = `<label>${T.prepost_label}</label>
     <select id="pairsel"><option value="">${T.no_link}</option>
-    ${cands.map(s=>`<option value="${s.id}">${T.post_of} ${s.ord}. ${s.question}</option>`).join("")}</select>`;
+    ${cands.map(s=>`<option value="${s.id}"${selected===s.id?" selected":""}>${T.post_of} ${s.ord}. ${s.question}</option>`).join("")}</select>`;
 }
 
 function listEditor(label, holderId) {
@@ -402,26 +460,27 @@ function listEditor(label, holderId) {
     <button class="sm" id="${holderId}-add" type="button">${T.add_item}</button>`;
 }
 
-function wireList(holderId) {
+function wireList(holderId, initial) {
   const holder = $("#"+holderId);
   const addRow = (val="") => {
     const div = document.createElement("div"); div.className="opt-row";
-    div.innerHTML = `<input placeholder="${T.item_ph}" value="${val}">
+    div.innerHTML = `<input placeholder="${T.item_ph}" value="${esc(val).replace(/"/g,'&quot;')}">
       <button class="sm" type="button">✕</button>`;
     div.querySelector("button").onclick = () => div.remove();
     holder.appendChild(div);
   };
   $(`#${holderId}-add`).onclick = () => addRow();
-  addRow(); addRow();
+  if (initial && initial.length) initial.forEach(v => addRow(v));
+  else { addRow(); addRow(); }
   return () => [...holder.querySelectorAll("input")].map(i=>i.value.trim()).filter(Boolean);
 }
 let getItems = null;
 
-function mcOptsInit() {
+function mcOptsInit(pre) {
   const addRow = (label="", correct=false) => {
     const quiz = $("#mcquiz").checked;
     const div = document.createElement("div"); div.className = "opt-row";
-    div.innerHTML = `<input class="olabel" placeholder="${T.item_ph}" value="${label}">
+    div.innerHTML = `<input class="olabel" placeholder="${T.item_ph}" value="${esc(label).replace(/"/g,'&quot;')}">
       <label class="ocorrect-wrap" style="display:${quiz?'inline-flex':'none'};align-items:center;gap:4px;white-space:nowrap;font-size:.78rem;color:var(--muted)">
         <input type="checkbox" class="ocorrect" style="width:auto;margin:0" ${correct?'checked':''}> ${T.correct}</label>
       <button class="sm" type="button">✕</button>`;
@@ -429,7 +488,15 @@ function mcOptsInit() {
     $("#opts").appendChild(div);
   };
   $("#opts-add").onclick = () => addRow();
-  addRow(); addRow();
+  if (pre) {   // pre-riempimento in modifica
+    $("#mcmulti").checked = !!pre.multi;
+    $("#mcquiz").checked = !!pre.quiz;
+    $("#mcother").checked = !!pre.allow_other;
+    const correct = new Set(pre.correct || []);
+    const opts = pre.options || [];
+    if (opts.length) opts.forEach(o => addRow(o.label, correct.has(o.id)));
+    else { addRow(); addRow(); }
+  } else { addRow(); addRow(); }
   const syncQuiz = () => {
     const quiz = $("#mcquiz").checked;
     document.querySelectorAll("#opts .ocorrect-wrap").forEach(w => w.style.display = quiz ? "inline-flex" : "none");
@@ -441,39 +508,43 @@ function mcOptsInit() {
   syncQuiz();
 }
 
-function renderCfg() {
+function renderCfg(pre) {
   const t = $("#stype").value;
-  const cfg = $("#cfg"); getItems = null;
+  const box = $("#cfg"); getItems = null;
+  const v = (id, val) => { const el = $(id); if (el != null) el.value = val; };
   if (t === "mc") {
-    cfg.innerHTML = `<label>${T.options_label}</label><div id="opts"></div>
+    box.innerHTML = `<label>${T.options_label}</label><div id="opts"></div>
       <button class="sm" id="opts-add" type="button">${T.add_item}</button>
       <label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input type="checkbox" id="mcmulti" style="width:auto;margin:0"> ${T.allow_multiple}</label>
       <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="mcquiz" style="width:auto;margin:0"> ${T.quiz_mode}</label>
       <label id="mcother-row" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="mcother" style="width:auto;margin:0"> ${T.allow_other_opt}</label>
       <p class="muted" id="quizhint" style="display:none;font-size:.8rem;margin:6px 0 0">${T.quiz_hint}</p>`;
-    mcOptsInit();
+    mcOptsInit(pre);
     getItems = null;  // mc letto direttamente in buildConfig
   }
-  else if (t === "ranking") { cfg.innerHTML = listEditor(T.rank_items_label,"opts"); getItems = wireList("opts"); }
-  else if (t === "groups") { cfg.innerHTML = listEditor(T.groups_label,"opts"); getItems = wireList("opts"); }
-  else if (t === "points") { cfg.innerHTML = listEditor(T.points_options_label,"opts"); getItems = wireList("opts"); }
+  else if (t === "ranking") { box.innerHTML = listEditor(T.rank_items_label,"opts"); getItems = wireList("opts", (pre&&pre.items||[]).map(i=>i.label)); }
+  else if (t === "groups") { box.innerHTML = listEditor(T.groups_label,"opts"); getItems = wireList("opts", (pre&&pre.groups||[]).map(g=>g.name)); }
+  else if (t === "points") { box.innerHTML = listEditor(T.points_options_label,"opts"); getItems = wireList("opts", (pre&&pre.options||[]).map(o=>o.label)); }
   else if (t === "scale") {
-    cfg.innerHTML = `<div class="row"><div><label>Min</label><input id="smin" type="number" value="1"></div>
+    box.innerHTML = `<div class="row"><div><label>Min</label><input id="smin" type="number" value="1"></div>
       <div><label>Max</label><input id="smax" type="number" value="5"></div></div>
       <label>${T.scale_min_label}</label><input id="slmin" placeholder="${T.scale_min_ph}">
       <label>${T.scale_max_label}</label><input id="slmax" placeholder="${T.scale_max_ph}">`;
+    if (pre) { v("#smin", pre.min ?? 1); v("#smax", pre.max ?? 5); v("#slmin", pre.min_label || ""); v("#slmax", pre.max_label || ""); }
   }
   else if (t === "quadrant") {
-    cfg.innerHTML = `<label>${T.quad_xl}</label><input id="qxl">
+    box.innerHTML = `<label>${T.quad_xl}</label><input id="qxl">
       <label>${T.quad_xr}</label><input id="qxr">
       <label>${T.quad_yt}</label><input id="qyt">
       <label>${T.quad_yb}</label><input id="qyb">`;
+    if (pre && pre.labels) { const L = pre.labels; v("#qxl", L.x_left||""); v("#qxr", L.x_right||""); v("#qyt", L.y_top||""); v("#qyb", L.y_bottom||""); }
   }
   else if (t === "argpoll") {
-    cfg.innerHTML = `<label>${T.claim_field_label}</label><input id="acl" placeholder="${T.claim_field_ph}">
+    box.innerHTML = `<label>${T.claim_field_label}</label><input id="acl" placeholder="${T.claim_field_ph}">
       <label>${T.just_field_label}</label><input id="ajl" placeholder="${T.just_field_ph}">`;
+    if (pre) { v("#acl", pre.claim_label || ""); v("#ajl", pre.justification_label || ""); }
   }
-  else { cfg.innerHTML = `<p class="muted">${T.no_config}</p>`; }
+  else { box.innerHTML = `<p class="muted">${T.no_config}</p>`; }
 }
 
 function buildConfig(t) {
