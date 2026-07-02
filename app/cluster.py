@@ -14,19 +14,19 @@ import json
 MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 4000
 
-SYSTEM = """Sei un analista di argomentazione. Ricevi una lista numerata di risposte, ognuna con un CLAIM (un criterio proposto) e una JUSTIFICATION (la ragione data a supporto).
+SYSTEM = """You are an argumentation analyst. You receive a numbered list of responses, each containing a CLAIM (a proposed criterion) and a JUSTIFICATION (the reason given in support of it).
 
-Produci DUE raggruppamenti distinti, entrambi DESCRITTIVI e mai valutativi:
+Produce TWO distinct groupings, both DESCRIPTIVE and never evaluative:
 
-1. claim_clusters — raggruppa i CLAIM per criterio sostanziale. L'etichetta è il criterio in forma breve e neutra (es. "Massimizzare il bene aggregato", "Proteggere i vulnerabili").
+1. claim_clusters — group the CLAIMS by substantive criterion. The label should express the criterion in a short, neutral form, for example: "Maximize aggregate benefit", "Protect vulnerable people".
+2. arg_clusters — group the JUSTIFICATIONS by THE TYPE OF CONSIDERATION THEY APPEAL TO, NOT by the claim they support. The label should be thematic and descriptive, using the form "Appeal to…", for example: "Appeal to impartiality", "Appeal to consequences", "Appeal to protecting vulnerable people", "Appeal to social contribution". The labels should describe what the argument appeals to without judging its validity. NEVER use evaluative terms such as "fallacious", "circular", "weak", "unethical", or "valid". Aim for 4–8 groups.
 
-2. arg_clusters — raggruppa le JUSTIFICATION per IL TIPO DI CONSIDERAZIONE A CUI FANNO APPELLO, NON per il claim che sostengono. L'etichetta è tematica e descrittiva, in stile "Appello a…": es. "Appello all'imparzialità", "Appello alle conseguenze", "Appello alla protezione dei deboli", "Appello al contributo sociale". Descrivono a cosa fa appello l'argomento, senza giudicarne la validità. Non usare MAI termini valutativi come "fallace", "circolare", "debole", "non etico", "valido". Punta a 4–8 gruppi.
+The same criterion may be supported by different kinds of appeals, and the same kind of appeal may support different criteria. This is normal and intentional.
 
-Lo stesso criterio può essere sostenuto da appelli diversi, e appelli uguali possono sostenere criteri diversi: è normale e voluto.
+Then assign EACH response, identified by its number, to exactly one claim_cluster and exactly one arg_cluster.
 
-Poi assegna OGNI risposta (per numero) a esattamente un claim_cluster e un arg_cluster.
-
-Usa la stessa lingua delle risposte per le etichette. Restituisci SOLO JSON valido, senza testo prima o dopo, in questo formato esatto:
+Write all labels in the same language as the responses. Do not infer the output language from this prompt. If the responses are in English, use English labels; if they are in another language, use that language.
+Return ONLY valid JSON, with no text before or after it, using exactly this format:
 {
   "claim_clusters": [{"id": "c1", "label": "..."}],
   "arg_clusters": [{"id": "a1", "label": "..."}],
@@ -34,15 +34,21 @@ Usa la stessa lingua delle risposte per le etichette. Restituisci SOLO JSON vali
 }"""
 
 
-SYSTEM_OPENTEXT = """Raggruppi le risposte a testo libero a una domanda in cluster TEMATICI, descrittivi e mai valutativi.
+SYSTEM_OPENTEXT = """You are a thematic response analyst. You receive a QUESTION and a numbered list of free-text RESPONSES.
 
-Ricevi la DOMANDA posta e una lista numerata di RISPOSTE. Produci:
+Your task is to group free-text answers to a question into THEMATIC clusters that are descriptive and never evaluative.
+You receive the QUESTION that was asked and a numbered list of RESPONSES.
 
-- clusters — gruppi tematici delle risposte. L'etichetta descrive il tema del gruppo in forma breve e neutra, nella lingua delle risposte, alla luce della domanda. È DESCRITTIVA (nomina di cosa parla il gruppo), mai valutativa: non usare MAI termini come "fallace", "circolare", "debole", "non etico", "giusto", "sbagliato". Punta a 4–8 gruppi.
+Group the responses by their SUBSTANTIVE TOPIC: the main issue, consideration, proposal, concern, reason, or perspective addressed by each response in relation to the question.
 
-- assignments — assegna OGNI risposta (per numero) a esattamente un cluster.
+Produce:
 
-Restituisci SOLO JSON valido, senza testo prima o dopo, in questo formato esatto:
+* clusters — group responses by their main substantive topic in relation to the question. The label describes the shared topic in a short, neutral form, in the same language as the responses. Group by what the response is about, not by wording, tone, sentiment, agreement, or level of detail. NEVER use evaluative terms such as "fallacious", "circular", "weak", "valid", "unethical", "right", or "wrong". Aim for 4–8 groups.
+* assignments — assign EACH response, identified by its number, to exactly one cluster. If a response covers multiple topics, assign it according to its main or most explicit focus.
+
+Write all labels in the same language as the responses.
+
+Return ONLY valid JSON, with no text before or after it, using exactly this format:
 {
   "clusters": [{"id": "t1", "label": "..."}],
   "assignments": [{"n": 1, "cluster": "t1"}]
@@ -50,14 +56,14 @@ Restituisci SOLO JSON valido, senza testo prima o dopo, in questo formato esatto
 
 
 def _build_user_msg(question: str, pairs: list) -> str:
-    lines = [f"DOMANDA: {question}", "", "Risposte:"]
+    lines = [f"QUESTION: {question}", "", "RESPONSES:"]
     for p in pairs:
         lines.append(f'{p["n"]}. CLAIM: {p["claim"]} | JUSTIFICATION: {p["justification"]}')
     return "\n".join(lines)
 
 
 def _build_opentext_msg(question: str, texts: list) -> str:
-    lines = [f"DOMANDA: {question}", "", "Risposte:"]
+    lines = [f"QUESTION: {question}", "", "RESPONSES:"]
     for t in texts:
         lines.append(f'{t["n"]}. {t["text"]}')
     return "\n".join(lines)
@@ -93,12 +99,12 @@ def _call(api_key: str, system: str, user_msg: str) -> dict:
 
 
 def cluster_argpoll(api_key: str, question: str, pairs: list) -> dict:
-    """pairs: [{n, claim, justification}]. Ritorna {claim_clusters, arg_clusters, assignments}."""
+    """pairs: [{n, claim, justification}]. Return {claim_clusters, arg_clusters, assignments}."""
     return _call(api_key, SYSTEM, _build_user_msg(question, pairs))
 
 
 def cluster_opentext(api_key: str, question: str, texts: list) -> dict:
-    """texts: [{n, text}]. Ritorna {clusters, assignments}."""
+    """texts: [{n, text}]. Return {clusters, assignments}."""
     data = _call(api_key, SYSTEM_OPENTEXT, _build_opentext_msg(question, texts))
     data.setdefault("clusters", [])
     return data
