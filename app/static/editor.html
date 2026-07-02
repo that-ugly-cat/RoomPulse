@@ -246,6 +246,9 @@ function slideConfigHtml(s) {
     const pre = current.slides.find(x => x.id === s.pair_id);
     rows.push(`<div class="cfgrow">↪ ${T.post_of} ${pre ? pre.ord+". "+pre.question : s.pair_id}</div>`);
   }
+  if (s.presenter_notes) {
+    rows.push(`<div class="cfgrow"><b>📝 ${T.presenter_notes_label}:</b> <span class="muted">${s.presenter_notes}</span></div>`);
+  }
   return rows.join("");
 }
 
@@ -374,6 +377,8 @@ function renderAddBox() {
     <label>${T.question_label}</label>
     <textarea id="squestion" rows="2" placeholder="${T.question_ph}"></textarea>
     <div id="cfg"></div>
+    <label>${T.presenter_notes_label}</label>
+    <textarea id="snotes" rows="2" placeholder="${T.presenter_notes_ph}"></textarea>
     <div id="pairbox"></div>
     <button class="primary" id="addslide" style="margin-top:12px">${T.add}</button>`;
   $("#stype").onchange = () => { renderCfg(); renderPairBox(); };
@@ -506,7 +511,8 @@ async function addSlide() {
   const pair_id = pairEl ? (pairEl.value || null) : null;
   await fetch(`/api/presentations/${current.id}/slides`, {
     method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({type:t, question, config:buildConfig(t), pair_id})});
+    body: JSON.stringify({type:t, question, config:buildConfig(t), pair_id,
+                          presenter_notes: $("#snotes").value.trim()})});
   selectP(current.id);
 }
 

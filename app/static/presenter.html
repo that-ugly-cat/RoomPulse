@@ -7,7 +7,7 @@
 <link rel="icon" href="/static/imgs/favicon.png">
 <style>
   :root { --bg:#0f1115; --card:#1a1d24; --fg:#e8eaed; --muted:#9aa0ab;
-          --accent:#16a3ab; --bar:#2a2e38; --ok:#3fb950; --danger:#d9554f; }
+          --accent:#16a3ab; --bar:#2a2e38; --ok:#3fb950; --danger:#d9554f; --orange:#e8862e; }
   * { box-sizing:border-box; }
   body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif;
          background:var(--bg); color:var(--fg); }
@@ -34,6 +34,18 @@
   .controls button { padding:11px 18px; border-radius:10px; font-weight:700; cursor:pointer;
         background:var(--card); color:var(--fg); border:1px solid var(--bar); }
   .controls button.primary { background:var(--accent); color:#04201f; border:0; }
+  .controls button.orange { background:var(--orange); color:#241200; border:0; }
+  .controls button.orange.danger { background:var(--danger); color:#fff; }
+  .controls button:disabled { opacity:.4; cursor:default; }
+  .controls .spacer { flex:1; }
+  .pnotes { background:#2a2410; border:1px solid #4a3f1a; border-left:3px solid var(--orange);
+        border-radius:8px; padding:11px 15px; margin:0 0 20px; color:#e8d9a8; line-height:1.55; }
+  .pnotes .tagn { display:block; font-size:.64rem; text-transform:uppercase; letter-spacing:.09em;
+        color:#b59a4a; margin-bottom:4px; }
+  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); max-width:90vw;
+        background:var(--danger); color:#fff; padding:12px 22px; border-radius:30px;
+        font-weight:700; opacity:0; transition:.3s; pointer-events:none; z-index:200; text-align:center; }
+  .toast.show { opacity:1; }
   .layout { display:grid; grid-template-columns:1fr; gap:24px; }
   .layout.mod { grid-template-columns:1fr 320px; }
   .barrow { display:flex; align-items:center; gap:14px; margin:14px 0; }
@@ -89,12 +101,19 @@
   </aside>
   <main class="main" id="main"><p class="empty">…</p></main>
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
 const $ = (s,r=document)=>r.querySelector(s);
 const params = new URLSearchParams(location.search);
 const pid = params.get("p");
 let state = null;
+let purgeArmed = false, purgeTimer = null;
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 2400);
+}
 
 // i18n
 const SUPP = ["it","en","de"];
@@ -146,23 +165,35 @@ function renderMain(slide, st, results, moderation, pair) {
   const isQa = slide.type === "qa";
   const isDonut = slide.type === "donut";
   const isToggle = isQa || isDonut;   // stati open/closed, niente reveal
-  const controls = isToggle
+  // navigazione fra slide (ordine ord)
+  const idx = state.slides.findIndex(s => s.id === slide.id);
+  const prevId = idx > 0 ? state.slides[idx-1].id : null;
+  const nextId = (idx >= 0 && idx < state.slides.length-1) ? state.slides[idx+1].id : null;
+  const navCtrls = `<button id="prev"${prevId?"":" disabled"}>${T.prev_slide}</button>
+       <button id="next"${nextId?"":" disabled"}>${T.next_slide}</button>`;
+  const typeCtrls = isToggle
     ? `<button class="primary" id="qatoggle">${st==="open"
          ? (isDonut?T.close_game:T.close_questions)
-         : (isDonut?T.reopen_game:T.reopen_questions)}</button>
-       <button id="newrun">${T.new_run}</button>`
+         : (isDonut?T.reopen_game:T.reopen_questions)}</button>`
     : `<button class="primary" id="reveal">${st==="revealed"?T.hide_results:T.show_results}</button>
        <button id="open">${T.reopen_vote}</button>
-       ${(slide.type==="argpoll"||slide.type==="opentext") ? `<button id="clusterbtn">${T.cluster_now}</button>` : ""}
-       <button id="newrun">${T.new_run}</button>`;
+       ${(slide.type==="argpoll"||slide.type==="opentext") ? `<button id="clusterbtn">${T.cluster_now}</button>` : ""}`;
+  const runCtrls = `<span class="spacer"></span>
+       <button class="orange" id="newrun">${T.new_run}</button>
+       <button class="orange" id="purge">${T.purge_runs}</button>`;
+  const notes = slide.presenter_notes
+    ? `<div class="pnotes"><span class="tagn">${T.presenter_notes_label}</span>${slide.presenter_notes}</div>` : "";
   $("#main").innerHTML = `
     <p class="q">${slide.question}</p>
     <p class="meta">${(results&&results.n)||0} ${T.responses_word} · ${T.state_word}: <b>${st}</b></p>
-    <div class="controls">${controls}</div>
+    ${notes}
+    <div class="controls">${navCtrls}${typeCtrls}${runCtrls}</div>
     <div class="layout ${hasMod?'mod':''}">
       <div id="res"></div>
       ${hasMod?'<div id="mod"></div>':''}
     </div>`;
+  if (prevId) $("#prev").onclick = () => activate(prevId);
+  if (nextId) $("#next").onclick = () => activate(nextId);
   if (isToggle) {
     $("#qatoggle").onclick = () => setState(slide.id, st==="open"?"closed":"open");
   } else {
@@ -170,6 +201,7 @@ function renderMain(slide, st, results, moderation, pair) {
     $("#open").onclick   = () => setState(slide.id, "open");
   }
   $("#newrun").onclick = newRun;
+  $("#purge").onclick = armPurge;
   if (slide.type === "argpoll" || slide.type === "opentext") {
     const cb = $("#clusterbtn");
     cb.onclick = async () => {
@@ -369,6 +401,29 @@ async function newRun() {
   await fetch(`/api/presentations/${pid}/runs`, {method:"POST",
     headers:{"Content-Type":"application/json"}, body:JSON.stringify({label:null})});
   await load();
+}
+
+// purge: due click di conferma (il primo arma il bottone e avvisa via toast)
+function armPurge() {
+  const b = $("#purge"); if (!b) return;
+  if (!purgeArmed) {
+    purgeArmed = true;
+    b.classList.add("danger"); b.textContent = T.purge_armed;
+    toast(T.purge_confirm);
+    purgeTimer = setTimeout(() => {
+      purgeArmed = false;
+      const bb = $("#purge"); if (bb) { bb.classList.remove("danger"); bb.textContent = T.purge_runs; }
+    }, 4000);
+    return;
+  }
+  clearTimeout(purgeTimer); purgeArmed = false;
+  purgeRuns();
+}
+async function purgeRuns() {
+  const res = await fetch(`/api/presentations/${pid}/runs`, {method:"DELETE"});
+  if (res.ok) { const d = await res.json(); toast(`${T.purged_toast} (${d.purged_runs})`); }
+  else { toast("Errore"); }
+  load();
 }
 
 document.getElementById("logout").onclick = async (e) => { e.preventDefault();

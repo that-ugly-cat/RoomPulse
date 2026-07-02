@@ -188,6 +188,7 @@ def _slide_dict(row) -> dict:
         "question": row["question"],
         "config": json.loads(row["config"]),
         "pair_id": row["pair_id"],
+        "presenter_notes": row["presenter_notes"],
     }
 
 
@@ -533,6 +534,7 @@ class SlideIn(BaseModel):
     question: str
     config: dict = {}
     pair_id: str | None = None   # pre/post: questa slide è la POST della slide indicata (PRE)
+    presenter_notes: str = ""    # visibili solo al presenter
 
 
 @app.post("/api/presentations/{pid}/slides")
@@ -556,10 +558,10 @@ def add_slide(pid: str, body: SlideIn, user: dict = CurrentUser):
         ).fetchone()
         sid = db.new_id()
         conn.execute(
-            "INSERT INTO slide (id, presentation_id, ord, type, question, config, pair_id) "
-            "VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO slide (id, presentation_id, ord, type, question, config, pair_id, presenter_notes) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (sid, pid, ord_row["n"], body.type, body.question,
-             json.dumps(body.config), body.pair_id),
+             json.dumps(body.config), body.pair_id, body.presenter_notes),
         )
         return {"id": sid, "ord": ord_row["n"]}
 
@@ -582,6 +584,30 @@ def start_run(pid: str, body: RunIn, user: dict = CurrentUser):
             "UPDATE presentation SET active_run_id=? WHERE id=?", (rid, pid)
         )
         return {"run_id": rid}
+
+
+@app.delete("/api/presentations/{pid}/runs")
+def purge_runs(pid: str, user: dict = CurrentUser):
+    """Distrugge TUTTI i run della deck (risposte, voti, moderazione, cluster) — tiene slide e deck."""
+    with db.get_conn() as conn:
+        _check_owner(conn, pid, user)
+        run_ids = [
+            r["id"] for r in conn.execute(
+                "SELECT id FROM run WHERE presentation_id=?", (pid,)
+            ).fetchall()
+        ]
+        for rid in run_ids:
+            conn.execute(
+                "DELETE FROM qa_vote WHERE response_id IN (SELECT id FROM response WHERE run_id=?)",
+                (rid,),
+            )
+            conn.execute("DELETE FROM response WHERE run_id=?", (rid,))
+            conn.execute("DELETE FROM run_slide WHERE run_id=?", (rid,))
+            conn.execute("DELETE FROM mc_option WHERE run_id=?", (rid,))
+            conn.execute("DELETE FROM cluster WHERE run_id=?", (rid,))
+        conn.execute("UPDATE presentation SET active_run_id=NULL WHERE id=?", (pid,))
+        conn.execute("DELETE FROM run WHERE presentation_id=?", (pid,))
+        return {"ok": True, "purged_runs": len(run_ids)}
 
 
 class ActivateIn(BaseModel):
@@ -801,6 +827,7 @@ def export_deck(pid: str, user: dict = CurrentUser):
                     "question": s["question"],
                     "config": json.loads(s["config"]),
                     "pair_ref": s["pair_id"],
+                    "presenter_notes": s["presenter_notes"],
                 }
                 for s in slides
             ],
@@ -813,6 +840,7 @@ class ImportSlide(BaseModel):
     question: str
     config: dict = {}
     pair_ref: str | None = None
+    presenter_notes: str = ""
 
 
 class ImportDeck(BaseModel):
@@ -834,9 +862,9 @@ def import_deck(body: ImportDeck, user: dict = CurrentUser):
         for i, s in enumerate(body.slides, start=1):
             sid = db.new_id()
             conn.execute(
-                "INSERT INTO slide (id, presentation_id, ord, type, question, config) "
-                "VALUES (?,?,?,?,?,?)",
-                (sid, pid, i, s.type, s.question, json.dumps(s.config)),
+                "INSERT INTO slide (id, presentation_id, ord, type, question, config, presenter_notes) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (sid, pid, i, s.type, s.question, json.dumps(s.config), s.presenter_notes),
             )
             new_ids.append(sid)
             if s.ref:
@@ -1008,6 +1036,7 @@ def live(code: str):
             "state": state,
             "slide": _slide_dict(slide),
         }
+        payload["slide"].pop("presenter_notes", None)  # mai al pubblico
         if slide["type"] == "qa":
             # qa: il pubblico vede e vota le domande altrui anche mentre è 'open'
             payload["feed"] = _qa_results(conn, rid, active)
@@ -1026,8 +1055,10 @@ def live(code: str):
                     "SELECT * FROM slide WHERE id=?", (slide["pair_id"],)
                 ).fetchone()
                 if pslide:
+                    ps = _slide_dict(pslide)
+                    ps.pop("presenter_notes", None)
                     payload["pair"] = {
-                        "slide": _slide_dict(pslide),
+                        "slide": ps,
                         "results": _results(conn, rid, pslide),
                     }
         return payload

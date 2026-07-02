@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS slide (
     question        TEXT NOT NULL,
     config          TEXT NOT NULL DEFAULT '{}',
     pair_id         TEXT,                  -- pre/post (post-v1, già nello schema)
+    presenter_notes TEXT NOT NULL DEFAULT '',  -- visibili solo al presenter, mai al pubblico
     UNIQUE (presentation_id, ord)
 );
 
@@ -109,6 +110,7 @@ _MIGRATIONS = [
     "ALTER TABLE response ADD COLUMN claim_cluster_id TEXT",
     "ALTER TABLE response ADD COLUMN arg_cluster_id TEXT",
     "ALTER TABLE response ADD COLUMN cluster_id TEXT",  # clustering a un asse (open text)
+    "ALTER TABLE slide ADD COLUMN presenter_notes TEXT NOT NULL DEFAULT ''",
 ]
 
 
