@@ -7,6 +7,10 @@
   Your audience answers from their phones; results appear as you speak.
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/License-AGPLv3-blue.svg"></a>
+</p>
+
 ---
 
 RoomPulse is a self-hosted live polling tool, built for keynotes and
@@ -91,3 +95,9 @@ proxy, backups).
 - Audience endpoints are public (by join code); everything else requires a presenter login.
 - Set `JWT_SECRET` in production (there is an insecure default for local dev).
 - The whole database is a single SQLite file — back up by copying it.
+
+## License
+
+Copyright (C) 2026 Giovanni Spitale. Licensed under AGPL-3.0 — fork it, host it, sell access
+to it, but keep it closed-source and you're in violation. No SaaS forks that don't share
+back. See [LICENSE](LICENSE).
