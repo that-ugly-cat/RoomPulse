@@ -40,14 +40,15 @@
     let frac = 0, fracTarget = 0;      // progresso interpolato (posizione razzo)
     let energy = 0, energyTarget = 0;  // room energy interpolata (gauge)
     let scroll = 0, frame = 0;
-    let flash = 0, lastWindows = 0, lastResult = null;
+    let flash = 0, flashPower = 0, lastWindows = 0, lastResult = null;
 
     function update(s) {
       state = s;
       if (!s) return;
       if (s.progress_frac != null) fracTarget = s.progress_frac;
       if (s.room_energy != null) energyTarget = s.room_energy;
-      if (s.windows_used != null && s.windows_used > lastWindows) { flash = 1; lastWindows = s.windows_used; }
+      // nuova finestra chiusa → fiammata + iperspazio, forza = ratio di quella finestra
+      if (s.windows_used != null && s.windows_used > lastWindows) { flash = 1; flashPower = s.room_energy || 0; lastWindows = s.windows_used; }
       if (s.status !== "running") lastWindows = s.windows_used || 0;
       lastResult = s.result || null;
     }
@@ -56,12 +57,15 @@
     function px(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(x | 0, y | 0, Math.ceil(w), Math.ceil(h)); }
     function lerp(a, b, t) { return a + (b - a) * t; }
 
-    function drawStars(list, speed, size, colors) {
+    function drawStars(list, speed, size, colors, streak) {
       for (const st of list) {
         const x = st.x * W;
-        let y = (st.y / 3 * H + scroll * speed) % H;
-        if (y < 0) y += H;
-        px(x, y, size, size, colors[(st.r * colors.length) | 0]);
+        const y = ((st.y / 3 * H + scroll * speed) % H + H) % H;
+        const c = colors[(st.r * colors.length) | 0];
+        if (streak > 1.5) {   // iperspazio: la stella diventa una scia verticale
+          ctx.fillStyle = c;
+          ctx.fillRect(x | 0, y | 0, Math.ceil(size), Math.ceil(size + streak * (0.4 + st.r)));
+        } else px(x, y, size, size, c);
       }
     }
 
@@ -101,7 +105,7 @@
       ctx.beginPath(); ctx.arc(cx, cy, r + ctx.lineWidth, Math.PI, 2 * Math.PI); ctx.stroke();
     }
 
-    function drawRocket(cx, cy, u, air) {
+    function drawRocket(cx, cy, u, air, boost) {
       const b = (gx, gy, gw, gh, c) => px(cx + gx * u, cy + gy * u, gw * u, gh * u, c);
       const red = "#e0503a", redd = "#b93a28", body = "#eef2fa", shade = "#b9c2d4",
         win = "#6fd8ec", wind = "#245a72", steel = "#8b93a8";
@@ -111,10 +115,13 @@
       b(4, 9, 6, 1, red);                                                // stripe
       b(2, 10, 2, 3, redd); b(10, 10, 2, 3, redd);                       // fins
       b(5, 13, 4, 1, steel); b(6, 14, 2, 1, steel);                      // nozzle
-      // flame
-      const f = air;
-      b(6, 15, 2, 1 + f, "#ffe066"); b(5, 16, 4, 1 + f, "#ffc23a");
-      b(6, 17 + f, 2, 1 + f, "#f0902a"); b(7, 19 + f, 1, 1, "#e0642a");
+      // flame — flicker con air, fiammata con boost (si allarga e allunga)
+      const f = air, e = boost | 0, wexp = e > 2 ? 1 : 0;
+      b(6, 15, 2, 1, "#ffe066");
+      b(5 - wexp, 16, 4 + 2 * wexp, 1 + f, "#ffc23a");
+      b(5, 17 + f, 4, 1 + f + e, "#f0902a");
+      b(6, 18 + f + e, 2, 1 + e, "#e0642a");
+      b(7, 19 + f + 2 * e, 1, 1 + (e >> 1), "#c0431e");
     }
 
     function overlay(title, sub, color) {
@@ -160,29 +167,30 @@
       frame++;
       frac = lerp(frac, fracTarget, 0.08);
       energy = lerp(energy, energyTarget, 0.12);
-      scroll += 0.4 + frac * 2.2;         // le stelle scorrono più veloci salendo
-      if (flash > 0) flash -= 0.04;
+      const boost = flash > 0 ? flash * flashPower : 0;   // 0..1 durante la fiammata
+      scroll += 0.4 + frac * 2.2 + boost * 34;            // surge iperspazio al boost
+      if (flash > 0) flash = Math.max(0, flash - 0.035);
 
       // sfondo gradiente
       const grad = ctx.createLinearGradient(0, 0, 0, H);
       grad.addColorStop(0, "#05060f"); grad.addColorStop(1, "#0c1a3a");
       ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
-      drawStars(farStars, 0.25, Math.max(1, W / 400), ["#26304e", "#2e3a5c", "#343f66"]);
-      drawStars(nearStars, 0.6, Math.max(2, W / 260), ["#c8d4f0", "#ffffff", "#9fb0e0"]);
+      drawStars(farStars, 0.25, Math.max(1, W / 400), ["#26304e", "#2e3a5c", "#343f66"], boost * 26);
+      drawStars(nearStars, 0.6, Math.max(2, W / 260), ["#c8d4f0", "#ffffff", "#9fb0e0"], boost * 62);
 
-      // Luna (cresce col progresso) e Terra (si allontana)
-      const moonR = W * (0.09 + frac * 0.06);
-      drawMoon(W * 0.62, H * (0.16 - frac * 0.02), moonR);
-      const earthR = W * (0.85 - frac * 0.25);
-      drawEarth(W / 2, H + earthR - W * (0.18 - frac * 0.16), earthR);
+      // Luna (cresce parecchio col progresso) e Terra (si rimpicciolisce e si allontana)
+      const moonR = W * (0.08 + frac * 0.15);
+      drawMoon(W * 0.6, H * 0.15, moonR);
+      const earthR = W * (0.95 - frac * 0.5);
+      drawEarth(W / 2, H + earthR - W * (0.24 - frac * 0.22), earthR);
 
       // razzo: sale da in basso verso l'alto col progresso
       const u = Math.max(2, W / 90);
       const ry = lerp(H * 0.7, H * 0.24, frac);
       const air = (frame >> 2) & 1;
-      drawRocket(W / 2 - 7 * u, ry, u, air + (flash > 0.5 ? 2 : 0));
+      drawRocket(W / 2 - 7 * u, ry, u, air, Math.round(boost * 7));
 
-      if (flash > 0.5) { ctx.fillStyle = `rgba(255,220,90,${flash * .18})`; ctx.fillRect(0, 0, W, H); }
+      if (boost > 0.12) { ctx.fillStyle = `rgba(255,225,110,${boost * .22})`; ctx.fillRect(0, 0, W, H); }
 
       const s = state;
       if (s && s.status === "running") {
