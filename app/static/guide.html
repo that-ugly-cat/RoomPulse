@@ -62,8 +62,10 @@
     <a href="#prepost">Pre / post</a>
     <a href="#quiz">Quiz mode</a>
     <a href="#groups">Random groups</a>
+    <a href="#connect">Connections</a>
     <a href="#donut">Donut energizer</a>
     <a href="#clustering">AI clustering</a>
+    <a href="#admin">Admin &amp; tiers</a>
     <a href="#moderation">Moderation</a>
     <a href="#data">Export &amp; import</a>
     <a href="#tips">Tips &amp; troubleshooting</a>
@@ -105,15 +107,19 @@
       <li><b>Add a slide</b> — pick a type, write the question, fill in the type-specific config
         (options, labels, min/max…), then <span class="kbd">Add</span>.</li>
       <li><b>Reorder</b> — drag the <span class="kbd">≡</span> handle.</li>
-      <li><b>Inspect</b> — click a slide to expand its config; <b>rename</b> the deck with the
-        <span class="kbd">✎</span>.</li>
+      <li><b>Inspect</b> — click a slide to expand its config; <b>rename</b> the deck with the pencil next to its title.</li>
+      <li><b>Presenter notes</b> — give any slide optional notes (debrief prompts, timing, reminders):
+        expand the slide and write them in. They show only to you on the presenter view, never to the audience.</li>
+      <li><b>Edit a slide</b> — the <span class="kbd">✎</span> on a slide reopens it, prefilled, for editing.
+        Notes are always editable; the question, options and config only while the slide has <b>no responses
+        yet</b> (purge the runs to unlock it). The type can't change — delete and re-add for that.</li>
       <li><b>Export / import</b> a deck as JSON to move it between accounts or back it up.</li>
     </ul>
     <p>The same deck can be <b>run many times</b>. Each <i>run</i> keeps its own responses, so you can
       reuse a deck across classes or sessions without mixing the data.</p>
 
     <h2 id="types">Slide types</h2>
-    <p>Ten question types plus a game. One question is active at a time; the audience sees exactly
+    <p>Eleven question types plus a game. One question is active at a time; the audience sees exactly
       what you activate.</p>
     <table>
       <tr><th>Type</th><th>What the audience does</th><th>How results show</th></tr>
@@ -128,6 +134,7 @@
       <tr><td><b>Q&amp;A + upvote</b></td><td>Ask questions and upvote others'.</td><td>Feed sorted by votes.</td></tr>
       <tr><td><b>Claim + justification</b></td><td>State a criterion and why.</td><td>Paired feed; AI clustering optional.</td></tr>
       <tr><td><b>Random groups</b></td><td>Get assigned to a balanced group.</td><td>Count per group.</td></tr>
+      <tr><td><b>Connections (mapping)</b></td><td>Link items across two columns.</td><td>Left×right heat matrix (+ bipartite graph for you).</td></tr>
       <tr><td><b>Donut</b> <span class="tag">game</span></td><td>Play a one-button runner.</td><td>Live leaderboard + histogram.</td></tr>
     </table>
 
@@ -147,6 +154,9 @@
       <li>Click a slide on the left to <b>activate</b> it. The first activation starts a <b>run</b>
         automatically; use <span class="kbd">New run</span> to start a fresh one (e.g. a new class).</li>
       <li>The audience is now answering. Watch the count and results update live.</li>
+      <li><b>Move between slides</b> with <span class="kbd">← Previous</span> / <span class="kbd">Next →</span>
+        at the top, or by clicking a slide on the left. The active slide's <b>presenter notes</b> show here,
+        above the controls.</li>
       <li>Control the slide state:
         <ul>
           <li><span class="kbd">Show results</span> / <span class="kbd">Hide</span> — reveal the chart to the audience (the classic dramatic reveal).</li>
@@ -156,6 +166,9 @@
     </ol>
     <p class="muted">Q&amp;A and Donut use <b>open / closed</b> instead of reveal: the feed / leaderboard
       is always visible, and you just open or close submissions.</p>
+    <p class="muted"><span class="kbd">Purge runs</span> (orange, top-right) wipes every run's data for the
+      deck — responses, votes, everything — but keeps the deck and slides. It asks for a second click to
+      confirm. Handy to reset a deck before reusing it (and it re-unlocks structural editing).</p>
 
     <h2 id="prepost">Pre / post</h2>
     <p>Ask the <b>same question before and after</b> your argument and show how the room moved. When
@@ -176,6 +189,19 @@
       the smallest group next) and <b>stable per participant</b> — refreshing keeps you in the same
       group. Handy for break-out activities and debates.</p>
 
+    <h2 id="connect">Connections (mapping)</h2>
+    <p>Two columns of items the audience <b>links</b> together — tap a left item, then a right item, to draw a
+      connection (tap the pair again to undo). When you build the slide you choose:</p>
+    <ul>
+      <li><b>Cardinality</b> — <i>one-to-one</i> (each item joins at most one on the other side) or
+        <i>one-to-many</i> (free fan-out: an item can link to several).</li>
+      <li><b>Direction</b> — left→right, right→left, or undirected (it just sets the arrows).</li>
+    </ul>
+    <p>Results aggregate into a <b>heat matrix</b> (left × right, each cell shaded by how many people linked
+      that pair), shown to both you and the audience; the presenter view also draws a <b>bipartite graph</b>
+      with edge thickness by frequency. Good for eliciting how the room maps concepts, causes, criteria, and
+      the like.</p>
+
     <h2 id="donut">Donut energizer</h2>
     <p>Not a question but a break that <b>also produces data</b>: a one-button endless-runner
       (<span class="kbd">tap</span> anywhere or <span class="kbd">space</span> to jump) that runs on
@@ -189,12 +215,30 @@
     <p>For <b>Claim + justification</b> and <b>Open text</b>, an LLM can group free responses into
       descriptive themes — for claim+justification along two axes (the criterion <b>and</b> the kind of
       appeal, with a criterion × appeal matrix). It's descriptive, never evaluative.</p>
-    <ol>
-      <li>Open the editor, click <span class="kbd">⚙</span>, and paste your own Anthropic API key
+    <p><b>Which key it uses depends on your tier:</b></p>
+    <ul>
+      <li><b>Free</b> — bring your own Anthropic API key: editor → <span class="kbd">⚙</span> → paste it
         (stored per user). Get one at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a>.</li>
-      <li>During the session, click <span class="kbd">Cluster</span> on that slide. Re-run any time to
-        refresh as more answers come in.</li>
-    </ol>
+      <li><b>Full</b> — clustering runs on the shared server key; nothing to configure, and your usage is
+        metered per user by the admin.</li>
+    </ul>
+    <p>Then, during the session, click <span class="kbd">Cluster</span> on that slide — re-run any time to
+      refresh as more answers come in.</p>
+
+    <h2 id="admin">Admin &amp; tiers</h2>
+    <p>Every account has a <b>tier</b>: <i>free</i> (own API key for clustering), <i>full</i> (shared
+      server key, metered), or <i>admin</i>. Admins get a <span class="kbd">🛡 Admin</span> link in the
+      editor header, opening a dashboard to:</p>
+    <ul>
+      <li><b>Manage users</b> — set each user's tier and activate/deactivate accounts. A guard stops you
+        from removing the last admin.</li>
+      <li><b>See usage &amp; cost</b> — a running total plus a per-user breakdown of tokens and cost spent
+        on the shared clustering key.</li>
+      <li><b>Distribute a deck</b> — for people who can't import a JSON: pick one of your decks, tick the
+        target users, and it's copied straight into their accounts as their own independent, editable copy.</li>
+    </ul>
+    <p class="muted">The first admin is set on the server via the <code>RP_ADMIN_EMAILS</code> environment
+      variable; the shared clustering key is <code>ANTHROPIC_API_KEY</code>.</p>
 
     <h2 id="moderation">Moderation</h2>
     <p>Free-text types (open text, Q&amp;A, claim+justification) show a <b>moderation queue</b> next to
