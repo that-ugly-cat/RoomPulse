@@ -10,6 +10,7 @@ Schema con separazione template/esecuzione:
 
 import os
 import sqlite3
+import time
 import uuid
 import secrets
 from datetime import datetime, timezone
@@ -116,6 +117,31 @@ CREATE TABLE IF NOT EXISTS cluster (
     ord          INTEGER NOT NULL,
     generated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS moonshot_game (
+    run_id        TEXT NOT NULL,
+    slide_id      TEXT NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'lobby',   -- lobby | running
+    captain_token TEXT,
+    total_crew    INTEGER NOT NULL DEFAULT 0,      -- congelato al launch (denominatore)
+    started_at_ms INTEGER,                         -- epoch ms del lancio (schedule finestre)
+    PRIMARY KEY (run_id, slide_id)
+);
+
+CREATE TABLE IF NOT EXISTS moonshot_player (
+    run_id   TEXT NOT NULL,
+    slide_id TEXT NOT NULL,
+    token    TEXT NOT NULL,
+    PRIMARY KEY (run_id, slide_id, token)
+);
+
+CREATE TABLE IF NOT EXISTS moonshot_boost (
+    run_id     TEXT NOT NULL,
+    slide_id   TEXT NOT NULL,
+    window_idx INTEGER NOT NULL,
+    token      TEXT NOT NULL,
+    PRIMARY KEY (run_id, slide_id, window_idx, token)   -- un tap per token per finestra (dedup)
+);
 """
 
 # colonne aggiunte a tabelle esistenti (migrazione idempotente per DB già creati)
@@ -137,17 +163,26 @@ def get_conn():
 
 
 def init_db():
-    with get_conn() as conn:
+    conn = get_conn()
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")  # letture e scritture non si bloccano (boost + poll)
         conn.executescript(SCHEMA)
         for stmt in _MIGRATIONS:
             try:
                 conn.execute(stmt)
             except sqlite3.OperationalError:
                 pass  # colonna già presente
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
 
 
 def new_id() -> str:

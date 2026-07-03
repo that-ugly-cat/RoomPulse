@@ -94,6 +94,12 @@
   table.cmx th, table.cmx td { border:1px solid var(--bar); padding:6px 8px; text-align:center; }
   table.cmx th { color:var(--muted); font-weight:600; }
   table.cmx th:first-child, table.cmx td:first-child { text-align:left; }
+  .msctl { margin-top:12px; min-height:56px; }
+  .msboost { font-size:1.5rem; padding:22px; }
+  .msboost.boosted { transform:scale(.97); background:#0d7d84; }
+  .mscap { text-align:center; font-weight:800; padding:11px; border-radius:11px; margin-bottom:10px;
+        background:#2a1a08; color:var(--accent); border:1px solid var(--bar); font-size:1.1rem; }
+  .mscap.now { background:#e8862e; color:#241200; border-color:#e8862e; }
 </style>
 </head>
 <body>
@@ -108,6 +114,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="/static/donut.js"></script>
+<script src="/static/moonshot.js"></script>
 <script>
 const $ = (s, r=document) => r.querySelector(s);
 const root = $("#root");
@@ -124,6 +131,10 @@ let groupsSlideId = null; // per assegnare il gruppo una sola volta per slide
 let donutSlideId = null; // monta il gioco una sola volta per slide
 let donutGame = null;    // istanza corrente del gioco (per destroy al cambio slide)
 let donutOpen = false;   // stato open/closed corrente (letto in onGameOver)
+let msSlideId = null;    // moonshot: monta la scena una volta per slide
+let msGame = null;       // istanza renderer moonshot
+let msTicker = null;     // countdown locale del capitano
+let msClockOffset = 0;   // server_now - Date.now(), per lo schedule locale
 let getPayload = null;   // funzione che il tipo corrente espone per costruire il payload
 let qaVoted = JSON.parse(localStorage.getItem("rp_qavotes") || "{}");
 
@@ -441,6 +452,67 @@ function updateDonutLb(results, open) {
      || `<p class="muted">${T.no_answers}</p>`) + `</div>`;
 }
 
+// --- moonshot: energizer collaborativo (scena condivisa + lobby/boost/capitano) ---
+function renderMoonshotShell(data) {
+  const s = data.slide;
+  if (msGame) { msGame.destroy(); msGame = null; }
+  root.innerHTML = `<div class="card" style="margin-bottom:8px;padding:14px"><p class="q" style="margin:0;font-size:1.05rem">${s.question||""}</p></div>
+    <div id="msscene"></div>
+    <div id="msctl" class="msctl"></div>
+    <p class="code">${T.code_label} ${code}</p>`;
+  msGame = Moonshot.mount($("#msscene"), { texts: {
+    altitude:T.ms_altitude, energy:T.ms_energy, crew:T.ms_crew, moonshot:"MOONSHOT",
+    ready_crew:T.ms_ready_crew, reached:T.ms_reached, incomplete:T.ms_incomplete } });
+}
+
+function updateMoonshot(data) {
+  const g = data.moonshot; if (!g) return;
+  if (msGame) msGame.update(g);
+  if (g.server_now_ms) msClockOffset = g.server_now_ms - Date.now();
+  const el = $("#msctl"); if (!el) return;
+  const joined = g.role === "crew" || g.role === "captain";
+  if (g.status === "lobby") {
+    el.innerHTML = joined
+      ? `<p class="muted" style="text-align:center;margin:0">${T.ms_you_ready} · ${g.ready_count} ${T.ms_ready_crew}</p>`
+      : `<button class="send" id="msready">${T.ms_join}</button>`;
+    if (!joined) $("#msready").onclick = msReady;
+    stopMsTicker();
+  } else if (g.status === "running" && !g.result) {
+    if (g.role === "spectator") { el.innerHTML = `<p class="muted" style="text-align:center;margin:0">${T.ms_watching}</p>`; stopMsTicker(); }
+    else {
+      el.innerHTML = (g.role === "captain" ? `<div id="mscap" class="mscap"></div>` : "") +
+        `<button class="send msboost" id="msboost">${T.ms_boost}</button>`;
+      $("#msboost").onclick = msBoost;
+      if (g.role === "captain") startMsTicker(g); else stopMsTicker();
+    }
+  } else {
+    el.innerHTML = `<p class="muted" style="text-align:center;margin:0;font-size:1.1rem">${g.result==="success"?T.ms_won:T.ms_lost}</p>`;
+    stopMsTicker();
+  }
+}
+
+async function msReady() {
+  const res = await fetch(`/api/live/${code}/moonshot/ready`, {method:"POST",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify({slide_id:msSlideId, token})});
+  if (res.ok) poll();
+}
+function msBoost() {
+  fetch(`/api/live/${code}/moonshot/boost`, {method:"POST",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify({slide_id:msSlideId, token})});
+  const b = $("#msboost"); if (b) { b.classList.add("boosted"); setTimeout(()=>{ if(b) b.classList.remove("boosted"); }, 180); }
+}
+function startMsTicker(g) {
+  if (msTicker) return;
+  const cyc = g.config.cycle_ms, win = g.config.window_ms, start = g.started_at_ms;
+  msTicker = setInterval(() => {
+    const el = $("#mscap"); if (!el) return;
+    const pos = ((Date.now() + msClockOffset) - start) % cyc;
+    if (pos < win) { el.className = "mscap now"; el.textContent = "🚀 " + T.ms_boost_now; }
+    else { el.className = "mscap"; el.textContent = T.ms_boost_in + " " + Math.ceil((cyc - pos)/1000); }
+  }, 200);
+}
+function stopMsTicker() { if (msTicker) { clearInterval(msTicker); msTicker = null; } }
+
 function renderSlide(data) {
   const s = data.slide;
   const inp = buildInput(s);
@@ -603,12 +675,16 @@ function showQuizResult(q) {
 async function poll() {
   if (!code) { if (lastSig!=="join") renderJoin(); return; }
   try {
-    const res = await fetch(`/api/live/${code}`);
+    const res = await fetch(`/api/live/${code}?t=${token}`);
     if (res.status === 404) { code=""; localStorage.removeItem("rp_code"); renderJoin(); return; }
     const data = await res.json();
     // lasciando una slide donut: distruggi il gioco (RAF + listener spazio)
     if (donutGame && !(data.slide && data.slide.type === "donut")) {
       donutGame.destroy(); donutGame = null; donutSlideId = null;
+    }
+    // lasciando moonshot: distruggi scena + ticker
+    if (msGame && !(data.slide && data.slide.type === "moonshot")) {
+      msGame.destroy(); msGame = null; msSlideId = null; stopMsTicker();
     }
     if (data.status === "waiting") { if (lastSig!=="waiting") renderWaiting(data.title); return; }
     const sig = `${data.slide.id}:${data.state}`;
@@ -630,6 +706,12 @@ async function poll() {
       return;
     }
     donutSlideId = null;
+    if (data.slide.type === "moonshot") {  // scena montata al cambio slide, stato ad ogni poll
+      if (data.slide.id !== msSlideId) { msSlideId = data.slide.id; renderMoonshotShell(data); }
+      updateMoonshot(data);
+      return;
+    }
+    msSlideId = null;
     if (sig === lastSig) return;
     lastSig = sig;
     if (data.state === "revealed") renderResults(data);

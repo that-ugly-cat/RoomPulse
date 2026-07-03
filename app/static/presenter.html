@@ -103,6 +103,7 @@
 </div>
 <div class="toast" id="toast"></div>
 
+<script src="/static/moonshot.js"></script>
 <script>
 const $ = (s,r=document)=>r.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -152,12 +153,59 @@ function render() {
   }).join("");
   $("#slides").querySelectorAll("li").forEach(li => li.onclick = () => activate(li.dataset.id));
 
-  if (!run) { $("#main").innerHTML = `<p class="empty">${T.no_run}</p>
+  if (!run) { killMs(); $("#main").innerHTML = `<p class="empty">${T.no_run}</p>
     <div class="controls"><button class="primary" id="newrun">${T.start_run}</button></div>`;
     $("#newrun").onclick = newRun; return; }
-  if (!activeId) { $("#main").innerHTML = `<p class='empty'>${T.click_slide}</p>`; return; }
+  if (!activeId) { killMs(); $("#main").innerHTML = `<p class='empty'>${T.click_slide}</p>`; return; }
   const slide = state.slides.find(s => s.id === activeId);
+  if (slide.type === "moonshot") { renderMoonshotPresenter(slide, run); return; }
+  killMs();
   renderMain(slide, states[activeId]||"open", run.results, run.moderation, run.pair);
+}
+
+let msGame = null, msSlideId = null;
+function killMs() { if (msGame) { msGame.destroy(); msGame = null; msSlideId = null; } }
+
+function renderMoonshotPresenter(slide, run) {
+  const g = run.moonshot;
+  if (slide.id !== msSlideId) {
+    msSlideId = slide.id;
+    if (msGame) msGame.destroy();
+    $("#main").innerHTML = `<p class="q">${slide.question}</p>
+      <div class="controls" id="mscontrols"></div>
+      <div id="msscene" style="max-width:480px"></div>
+      <p class="meta" id="msmeta" style="margin-top:14px"></p>`;
+    msGame = Moonshot.mount($("#msscene"), { texts: {
+      altitude:T.ms_altitude, energy:T.ms_energy, crew:T.ms_crew, moonshot:"MOONSHOT",
+      ready_crew:T.ms_ready_crew, reached:T.ms_reached, incomplete:T.ms_incomplete } });
+  }
+  if (msGame && g) msGame.update(g);
+  const el = $("#mscontrols"), st = g ? g.status : "lobby";
+  let html;
+  if (st === "lobby") {
+    const can = g && g.ready_count >= (g.min_players||3);
+    html = `<button class="primary" id="mslaunch" ${can?"":"disabled"}>${T.ms_launch} (${g?g.ready_count:0})</button>`;
+  } else if (g && !g.result) {
+    html = `<button id="msreassign">${T.ms_reassign}</button><button class="orange" id="msreset">${T.ms_reset}</button>`;
+  } else {
+    html = `<button class="primary" id="msreset">${T.ms_reset}</button>`;
+  }
+  html += `<span class="spacer"></span><button class="orange" id="newrun">${T.new_run}</button>`;
+  el.innerHTML = html;
+  if ($("#mslaunch")) $("#mslaunch").onclick = () => msAction("launch", slide.id);
+  if ($("#msreassign")) $("#msreassign").onclick = () => msAction("reassign", slide.id);
+  if ($("#msreset")) $("#msreset").onclick = () => msAction("reset", slide.id);
+  $("#newrun").onclick = newRun;
+  const m = $("#msmeta");
+  if (m && g) m.textContent = st === "lobby" ? `${g.ready_count} ${T.ms_ready_crew} · min ${g.min_players}`
+    : (g.result ? (g.result==="success"?T.ms_reached:T.ms_incomplete) + " · " + Math.round(g.progress_frac*100)+"%"
+       : `${T.ms_crew} ${g.total_crew} · ${Math.round(g.progress_frac*100)}% · ${g.boosts_left} boost`);
+}
+
+async function msAction(kind, slide_id) {
+  const res = await fetch(`/api/runs/${state.run.id}/moonshot/${kind}`, {method:"POST",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify({slide_id})});
+  if (res.ok) load(); else { const e = await res.json().catch(()=>({})); alert(e.detail||"Errore"); }
 }
 
 function renderMain(slide, st, results, moderation, pair) {

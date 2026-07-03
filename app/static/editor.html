@@ -104,7 +104,7 @@
 
 <script>
 const $ = (s,r=document)=>r.querySelector(s);
-const TYPES = ["mc","scale","wordcloud","quadrant","ranking","points","opentext","qa","argpoll","groups","connect","donut"];
+const TYPES = ["mc","scale","wordcloud","quadrant","ranking","points","opentext","qa","argpoll","groups","connect","donut","moonshot"];
 let presentations = [];
 let current = null;   // dettaglio presentation selezionata
 let editingId = null; // id slide in modifica (null = modalità aggiunta)
@@ -272,6 +272,8 @@ function slideConfigHtml(s) {
     rows.push(chips(T.connect_left, (c.left||[]).map(o=>o.label)));
     rows.push(chips(T.connect_right, (c.right||[]).map(o=>o.label)));
     rows.push(`<div class="cfgrow muted">${c.cardinality||""} · ${c.direction||""}</div>`);
+  } else if (s.type === "moonshot") {
+    rows.push(`<div class="cfgrow muted">${T.ms_distance} ${c.distance} · ${T.ms_reserve} ${c.reserve} · ${c.window_ms}/${c.cycle_ms}ms</div>`);
   } else {
     rows.push(`<div class="cfgrow muted">${T.no_config}</div>`);
   }
@@ -563,6 +565,15 @@ function renderCfg(pre) {
     getRight = wireList("optsR", (pre && pre.right || []).map(o => o.label));
     if (pre) { v("#ccard", pre.cardinality || "one-to-many"); v("#cdir", pre.direction || "ltr"); }
   }
+  else if (t === "moonshot") {
+    box.innerHTML = `<div class="row">
+      <div><label>${T.ms_distance}</label><input id="msdist" type="number" min="1" value="8"></div>
+      <div><label>${T.ms_reserve}</label><input id="msres" type="number" min="0" value="4"></div></div>
+      <div class="row">
+      <div><label>${T.ms_window}</label><input id="mswin" type="number" step="500" value="3000"></div>
+      <div><label>${T.ms_cycle}</label><input id="mscyc" type="number" step="500" value="5000"></div></div>`;
+    if (pre) { v("#msdist", pre.distance ?? 8); v("#msres", pre.reserve ?? 4); v("#mswin", pre.window_ms ?? 3000); v("#mscyc", pre.cycle_ms ?? 5000); }
+  }
   else { box.innerHTML = `<p class="muted">${T.no_config}</p>`; }
 }
 
@@ -595,6 +606,8 @@ function buildConfig(t) {
     right: getRight().map((l,i)=>({id:"r"+i, label:l})),
     cardinality: $("#ccard").value, direction: $("#cdir").value,
   };
+  if (t === "moonshot") return {distance:Number($("#msdist").value), reserve:Number($("#msres").value),
+                                window_ms:Number($("#mswin").value), cycle_ms:Number($("#mscyc").value)};
   return {};
 }
 

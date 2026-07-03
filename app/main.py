@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import secrets
 
 import segno
 from openpyxl import Workbook
@@ -44,6 +45,10 @@ CENTRAL_API_KEY = os.environ.get("ANTHROPIC_API_KEY")   # chiave del server per 
 PRICE_IN = float(os.environ.get("RP_PRICE_IN_PER_MTOK", "3.0"))
 PRICE_OUT = float(os.environ.get("RP_PRICE_OUT_PER_MTOK", "15.0"))
 RP_ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get("RP_ADMIN_EMAILS", "").split(",") if e.strip()]
+
+# ── Moonshot (energizer collaborativo) ───────────────────────────────────────
+MOON_DISTANCE_KM = 384400   # distanza media Terra-Luna, per l'altitudine
+MOONSHOT_MIN_PLAYERS = 3
 
 app = FastAPI(title="RoomPulse")
 
@@ -911,6 +916,9 @@ def presenter_view(pid: str, user: dict = CurrentUser):
                 "moderation": moderation,
                 "pair": pair,
             }
+            if active and aslide and aslide["type"] == "moonshot":
+                _ensure_moonshot_lobby(conn, rid, active)
+                out["run"]["moonshot"] = _moonshot_state(conn, rid, aslide)
         return out
 
 
@@ -1212,8 +1220,8 @@ def _resolve_run(conn, code: str):
 
 
 @app.get("/api/live/{code}")
-def live(code: str):
-    """Ciò che il client del pubblico richiede in polling."""
+def live(code: str, t: str | None = None):
+    """Ciò che il client del pubblico richiede in polling. `t` = token (personalizza moonshot)."""
     with db.get_conn() as conn:
         pres = _resolve_run(conn, code)
         rid = pres["active_run_id"]
@@ -1240,6 +1248,9 @@ def live(code: str):
         if slide["type"] == "donut":
             # leaderboard non segreta: sempre allegata (l'audience mostra top3 se open, tutto se closed)
             payload["results"] = _results(conn, rid, slide)
+        if slide["type"] == "moonshot":
+            _ensure_moonshot_lobby(conn, rid, active)
+            payload["moonshot"] = _moonshot_state(conn, rid, slide, t)
         if slide["type"] == "mc":
             # mc: opzioni base + quelle aggiunte dai partecipanti (allow_other)
             cfg = payload["slide"]["config"]
@@ -1455,6 +1466,221 @@ def assign(code: str, body: AssignIn):
             (db.new_id(), rid, body.slide_id, body.token, json.dumps(payload), db.now_iso()),
         )
         return payload
+
+
+# ----------------------------------------------------------------------------
+# Moonshot — energizer collaborativo (lifecycle + progresso on-demand)
+# ----------------------------------------------------------------------------
+def _moonshot_config(slide) -> dict:
+    c = json.loads(slide["config"])
+    return {
+        "distance": max(1, int(c.get("distance", 8))),
+        "reserve": max(0, int(c.get("reserve", 4))),
+        "window_ms": int(c.get("window_ms", 3000)),
+        "cycle_ms": int(c.get("cycle_ms", 5000)),
+    }
+
+
+def _ensure_moonshot_lobby(conn, run_id: str, slide_id: str) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO moonshot_game (run_id, slide_id, status, total_crew) VALUES (?,?,'lobby',0)",
+        (run_id, slide_id),
+    )
+
+
+def _moonshot_state(conn, run_id: str, slide, token: str | None = None) -> dict:
+    """Stato completo del gioco, calcolato on-demand. `token` personalizza il ruolo."""
+    sid = slide["id"]
+    cfg = _moonshot_config(slide)
+    N, X, win, cyc = cfg["distance"], cfg["reserve"], cfg["window_ms"], cfg["cycle_ms"]
+    total_windows = N + X
+    g = conn.execute(
+        "SELECT * FROM moonshot_game WHERE run_id=? AND slide_id=?", (run_id, sid)
+    ).fetchone()
+    ready = conn.execute(
+        "SELECT COUNT(*) AS c FROM moonshot_player WHERE run_id=? AND slide_id=?", (run_id, sid)
+    ).fetchone()["c"]
+
+    def _role():
+        if not (g and token):
+            return "spectator"
+        if token == g["captain_token"]:
+            return "captain"
+        if conn.execute(
+            "SELECT 1 FROM moonshot_player WHERE run_id=? AND slide_id=? AND token=?",
+            (run_id, sid, token),
+        ).fetchone():
+            return "crew"
+        return "spectator"
+
+    out = {
+        "config": cfg,
+        "ready_count": ready,
+        "role": _role(),
+        "min_players": MOONSHOT_MIN_PLAYERS,
+    }
+    if not g or g["status"] == "lobby":
+        out["status"] = "lobby"
+        return out
+
+    total_crew = g["total_crew"] or 1
+    start = g["started_at_ms"]
+    now = db.now_ms()
+    elapsed = max(0, now - start)
+    cur_idx = elapsed // cyc
+    in_window = (elapsed % cyc) < win
+    counts = {
+        r["window_idx"]: r["c"]
+        for r in conn.execute(
+            "SELECT window_idx, COUNT(*) AS c FROM moonshot_boost "
+            "WHERE run_id=? AND slide_id=? GROUP BY window_idx", (run_id, sid)
+        ).fetchall()
+    }
+    progress = 0.0
+    windows_used = 0
+    last_ratio = 0.0
+    for i in range(total_windows):
+        if now >= start + i * cyc + win:            # finestra i chiusa
+            ratio = min(1.0, counts.get(i, 0) / total_crew)
+            progress += ratio
+            windows_used += 1
+            last_ratio = ratio
+        else:
+            break
+    won = progress >= N
+    failed = windows_used >= total_windows and not won
+    result = "success" if won else ("failed" if failed else None)
+    frac = min(1.0, progress / N)
+    open_idx = int(cur_idx) if (in_window and cur_idx < total_windows and result is None) else None
+    you_boosted = bool(
+        token and open_idx is not None and conn.execute(
+            "SELECT 1 FROM moonshot_boost WHERE run_id=? AND slide_id=? AND window_idx=? AND token=?",
+            (run_id, sid, open_idx, token),
+        ).fetchone()
+    )
+    out.update({
+        "status": "running",
+        "total_crew": total_crew,
+        "captain": g["captain_token"],
+        "progress": round(progress, 4),
+        "progress_frac": round(frac, 4),
+        "altitude_km": round(frac * MOON_DISTANCE_KM),
+        "boosts_left": max(0, total_windows - windows_used),
+        "windows_used": windows_used,
+        "total_windows": total_windows,
+        "room_energy": round(last_ratio, 3),
+        "result": result,
+        "window_open": open_idx is not None,
+        "window_idx": open_idx,
+        "you_boosted": you_boosted,
+        # per il countdown locale del capitano (schedule ricostruibile client-side)
+        "started_at_ms": start,
+        "server_now_ms": now,
+    })
+    return out
+
+
+class MoonshotIn(BaseModel):
+    slide_id: str
+    token: str
+
+
+class MoonshotSlideIn(BaseModel):
+    slide_id: str
+
+
+@app.post("/api/live/{code}/moonshot/ready")
+def moonshot_ready(code: str, body: MoonshotIn):
+    with db.get_conn() as conn:
+        pres = _resolve_run(conn, code)
+        rid = pres["active_run_id"]
+        if not rid:
+            raise HTTPException(409, "nessun run attivo")
+        _ensure_moonshot_lobby(conn, rid, body.slide_id)
+        g = conn.execute(
+            "SELECT status FROM moonshot_game WHERE run_id=? AND slide_id=?", (rid, body.slide_id)
+        ).fetchone()
+        if g["status"] != "lobby":
+            return {"ok": True, "ready": False, "spectator": True}  # partita avviata → spettatore
+        conn.execute(
+            "INSERT OR IGNORE INTO moonshot_player (run_id, slide_id, token) VALUES (?,?,?)",
+            (rid, body.slide_id, body.token),
+        )
+        return {"ok": True, "ready": True}
+
+
+@app.post("/api/live/{code}/moonshot/boost")
+def moonshot_boost(code: str, body: MoonshotIn):
+    with db.get_conn() as conn:
+        pres = _resolve_run(conn, code)
+        rid = pres["active_run_id"]
+        if not rid:
+            raise HTTPException(409, "nessun run attivo")
+        slide = conn.execute("SELECT * FROM slide WHERE id=?", (body.slide_id,)).fetchone()
+        if not slide or slide["type"] != "moonshot":
+            raise HTTPException(404, "slide non valida")
+        st = _moonshot_state(conn, rid, slide, body.token)
+        if st["status"] != "running" or st.get("result") is not None:
+            raise HTTPException(409, "gioco non attivo")
+        if not st.get("window_open"):
+            return {"ok": True, "boosted": False}   # nessuna finestra aperta: tap ignorato (soft)
+        if not conn.execute(
+            "SELECT 1 FROM moonshot_player WHERE run_id=? AND slide_id=? AND token=?",
+            (rid, body.slide_id, body.token),
+        ).fetchone():
+            raise HTTPException(403, "non sei nella crew")
+        conn.execute(
+            "INSERT OR IGNORE INTO moonshot_boost (run_id, slide_id, window_idx, token) VALUES (?,?,?,?)",
+            (rid, body.slide_id, st["window_idx"], body.token),
+        )
+        return {"ok": True, "boosted": True}
+
+
+@app.post("/api/runs/{rid}/moonshot/launch")
+def moonshot_launch(rid: str, body: MoonshotSlideIn, user: dict = CurrentUser):
+    with db.get_conn() as conn:
+        _check_owner(conn, _pid_of_run(conn, rid), user)
+        _ensure_moonshot_lobby(conn, rid, body.slide_id)
+        players = [
+            r["token"] for r in conn.execute(
+                "SELECT token FROM moonshot_player WHERE run_id=? AND slide_id=?", (rid, body.slide_id)
+            ).fetchall()
+        ]
+        if len(players) < MOONSHOT_MIN_PLAYERS:
+            raise HTTPException(400, f"servono almeno {MOONSHOT_MIN_PLAYERS} giocatori pronti")
+        conn.execute(
+            "UPDATE moonshot_game SET status='running', captain_token=?, total_crew=?, started_at_ms=? "
+            "WHERE run_id=? AND slide_id=?",
+            (secrets.choice(players), len(players), db.now_ms(), rid, body.slide_id),
+        )
+        return {"ok": True, "total_crew": len(players)}
+
+
+@app.post("/api/runs/{rid}/moonshot/reassign")
+def moonshot_reassign(rid: str, body: MoonshotSlideIn, user: dict = CurrentUser):
+    with db.get_conn() as conn:
+        _check_owner(conn, _pid_of_run(conn, rid), user)
+        players = [
+            r["token"] for r in conn.execute(
+                "SELECT token FROM moonshot_player WHERE run_id=? AND slide_id=?", (rid, body.slide_id)
+            ).fetchall()
+        ]
+        if not players:
+            raise HTTPException(400, "nessun giocatore")
+        conn.execute(
+            "UPDATE moonshot_game SET captain_token=? WHERE run_id=? AND slide_id=?",
+            (secrets.choice(players), rid, body.slide_id),
+        )
+        return {"ok": True}
+
+
+@app.post("/api/runs/{rid}/moonshot/reset")
+def moonshot_reset(rid: str, body: MoonshotSlideIn, user: dict = CurrentUser):
+    with db.get_conn() as conn:
+        _check_owner(conn, _pid_of_run(conn, rid), user)
+        for tbl in ("moonshot_boost", "moonshot_player", "moonshot_game"):
+            conn.execute(f"DELETE FROM {tbl} WHERE run_id=? AND slide_id=?", (rid, body.slide_id))
+        return {"ok": True}
 
 
 class ClusterIn(BaseModel):
