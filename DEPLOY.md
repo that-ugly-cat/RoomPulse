@@ -81,7 +81,7 @@ Put it behind a proxy that terminates TLS. The audience joins over the public UR
 matters (QR codes point at it). Example **Caddy**:
 
 ```
-roompulse.example.org {
+yourdomain.example {
     reverse_proxy localhost:8080
 }
 ```
