@@ -67,6 +67,7 @@
     <a href="#donut">Donut energizer</a>
     <a href="#clustering">AI clustering</a>
     <a href="#admin">Admin &amp; tiers</a>
+    <a href="#users">Users &amp; passwords</a>
     <a href="#moderation">Moderation</a>
     <a href="#data">Export &amp; import</a>
     <a href="#tips">Tips &amp; troubleshooting</a>
@@ -273,6 +274,24 @@
     </ul>
     <p class="muted">The first admin is set on the server via the <code>RP_ADMIN_EMAILS</code> environment
       variable; the shared clustering key is <code>ANTHROPIC_API_KEY</code>.</p>
+
+    <h2 id="users">Users &amp; passwords</h2>
+    <p>Anyone can <b>change their own password</b> from the editor: <span class="kbd">⚙</span> →
+      <i>Change password</i>. You need your current one. Your own session stays logged in; any other
+      session on that account is dropped.</p>
+    <p>Admins get more from <span class="kbd">🛡</span> <i>Admin</i>:</p>
+    <ul>
+      <li><b>Create a user</b> — email, name, initial password, role. Hand them the password and let
+        them change it themselves.</li>
+      <li><b>Reset a password</b> — the <span class="kbd">🔑</span> button on their row. Their open
+        sessions are dropped immediately, so this also works as "lock that account out now".</li>
+      <li><b>Deactivate</b> (the <i>Active</i> toggle) or <b>delete</b> (<span class="kbd">🗑</span>).
+        Deactivating keeps everything and just blocks login; deleting also destroys all of that
+        user's decks, runs and responses, and cannot be undone. Their cost history stays in the
+        overall total.</li>
+    </ul>
+    <p>You cannot delete yourself, and the last remaining admin cannot be deleted, demoted or
+      deactivated — so you cannot lock yourself out of your own instance.</p>
 
     <h2 id="moderation">Moderation</h2>
     <p>Free-text types (open text, Q&amp;A, claim+justification) show a <b>moderation queue</b> next to

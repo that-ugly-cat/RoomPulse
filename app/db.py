@@ -165,6 +165,7 @@ _MIGRATIONS = [
     "ALTER TABLE slide ADD COLUMN presenter_notes TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE user ADD COLUMN role TEXT NOT NULL DEFAULT 'free'",
     "ALTER TABLE response ADD COLUMN source_response_id TEXT",  # argstep: la risposta da cui eredita
+    "ALTER TABLE user ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",  # invalida le sessioni al cambio password
 ]
 
 

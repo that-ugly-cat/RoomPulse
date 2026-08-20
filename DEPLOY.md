@@ -33,6 +33,11 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8080
 
 > On Windows, run **without** `--reload`: the reloader can leave orphan workers holding the port.
 
+Users can also be created from the admin panel (`/admin`) once you have one admin: set
+`RP_ADMIN_EMAILS` to the address you will register with, and that account is promoted on
+startup. `RP_SIGNUP_CODE`, if set, gates self-registration behind a shared code — **without
+it, anyone who reaches `/login` can create an account.**
+
 Create real users and **change/remove the demo user** before going public:
 
 ```bash

@@ -95,6 +95,14 @@
     <label id="set-apilabel"></label>
     <input id="set-apikey" type="password">
     <p class="muted" id="set-status" style="font-size:.8rem;margin:6px 0 0"></p>
+    <hr style="border:0;border-top:1px solid var(--bar);margin:18px 0 14px">
+    <label id="set-pwlabel" style="font-weight:600"></label>
+    <input id="set-pwcur" type="password" autocomplete="current-password">
+    <input id="set-pwnew" type="password" autocomplete="new-password" style="margin-top:8px">
+    <div style="display:flex;align-items:center;gap:10px;margin-top:8px">
+      <button class="sm" id="set-pwsave"></button>
+      <span class="muted" id="set-pwmsg" style="font-size:.8rem"></span>
+    </div>
     <div class="actions">
       <button id="set-cancel">✕</button>
       <button class="primary" id="set-save"></button>
@@ -381,12 +389,31 @@ async function openSettings() {
   $("#set-apikey").placeholder = T.api_key_ph;
   $("#set-apikey").value = "";
   $("#set-save").textContent = T.save;
+  $("#set-pwlabel").textContent = T.pw_change;
+  $("#set-pwcur").placeholder = T.pw_current;
+  $("#set-pwnew").placeholder = T.pw_new;
+  $("#set-pwsave").textContent = T.pw_update;
+  $("#set-pwcur").value = ""; $("#set-pwnew").value = ""; $("#set-pwmsg").textContent = "";
   try {
     const me = await (await fetch("/api/me")).json();
     $("#set-status").textContent = me.api_key_set ? `${T.api_key_set} (${me.api_key_hint})` : "—";
   } catch { $("#set-status").textContent = "—"; }
   $("#setoverlay").classList.add("show");
   $("#set-cancel").onclick = () => $("#setoverlay").classList.remove("show");
+  $("#set-pwsave").onclick = async () => {
+    const cur = $("#set-pwcur").value, nw = $("#set-pwnew").value;
+    const msg = $("#set-pwmsg");
+    if (nw.length < 6) { msg.style.color = "var(--danger)"; msg.textContent = T.pw_too_short; return; }
+    const res = await fetch("/api/me/password", {method:"PUT",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({current: cur, new: nw})});
+    if (res.ok) {
+      msg.style.color = "var(--ok)"; msg.textContent = T.pw_changed;
+      $("#set-pwcur").value = ""; $("#set-pwnew").value = "";
+    } else {
+      const e = await res.json().catch(()=>({}));
+      msg.style.color = "var(--danger)"; msg.textContent = e.detail || "Errore";
+    }
+  };
   $("#set-save").onclick = async () => {
     const k = $("#set-apikey").value.trim();
     await fetch("/api/me/api-key", {method:"PUT", headers:{"Content-Type":"application/json"},

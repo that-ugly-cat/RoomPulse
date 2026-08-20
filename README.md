@@ -42,6 +42,9 @@ the deck and sees results update live. Try it live [here](https://roompulse.bora
   claim+justification: the criterion **and** the kind of appeal, with a criterion × appeal
   matrix; for the argument chain: criterion **and** kind of objection). Each presenter uses
   their own Anthropic API key.
+- **User management** — admins create users, reset passwords, deactivate or delete accounts
+  from the admin panel; everyone can change their own password. A password change or reset
+  drops that account's other open sessions, and the last admin can't be locked out.
 - **Live moderation** for free-text answers, **per-owner isolation** (each user only sees
   their own decks), **deck export/import** (JSON) and **data export** (Excel — one sheet per run).
 - **Trilingual UI** — Italian, English, German.

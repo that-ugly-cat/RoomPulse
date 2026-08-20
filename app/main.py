@@ -120,6 +120,29 @@ def auth_config():
     return {"signup_code_required": bool(SIGNUP_CODE)}
 
 
+MIN_PASSWORD = 6
+
+
+def _clean_email(raw: str) -> str:
+    email = (raw or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "email non valida")
+    return email
+
+
+def _check_password(pw: str) -> str:
+    if len(pw or "") < MIN_PASSWORD:
+        raise HTTPException(400, f"password troppo corta (minimo {MIN_PASSWORD} caratteri)")
+    return pw
+
+
+def _bump_token_version(conn, uid: str) -> int:
+    """Invalida le sessioni gia aperte di quell'utente. Senza questo un reset password
+    sarebbe cosmetico: il cookie vecchio resterebbe valido per giorni."""
+    conn.execute("UPDATE user SET token_version = token_version + 1 WHERE id=?", (uid,))
+    return conn.execute("SELECT token_version FROM user WHERE id=?", (uid,)).fetchone()[0]
+
+
 class RegisterIn(BaseModel):
     email: str
     password: str
@@ -131,11 +154,8 @@ class RegisterIn(BaseModel):
 def register(body: RegisterIn, response: Response):
     if SIGNUP_CODE and (body.signup_code or "") != SIGNUP_CODE:
         raise HTTPException(403, "codice di registrazione non valido")
-    email = body.email.strip().lower()
-    if not email or "@" not in email:
-        raise HTTPException(400, "email non valida")
-    if len(body.password) < 6:
-        raise HTTPException(400, "password troppo corta (minimo 6 caratteri)")
+    email = _clean_email(body.email)
+    _check_password(body.password)
     with db.get_conn() as conn:
         if conn.execute("SELECT 1 FROM user WHERE email=?", (email,)).fetchone():
             raise HTTPException(409, "email già registrata")
@@ -162,7 +182,7 @@ def login(body: LoginIn, response: Response):
         ).fetchone()
     if not u or not auth.verify_password(body.password, u["password_hash"]):
         raise HTTPException(401, "Credenziali errate")
-    token = auth.create_token(u["id"])
+    token = auth.create_token(u["id"], u["token_version"])
     response.set_cookie(
         "session", token, httponly=True, samesite="lax", max_age=auth.EXPIRE_DAYS * 86400
     )
@@ -200,6 +220,28 @@ def set_api_key(body: ApiKeyIn, user: dict = CurrentUser):
     return {"ok": True, "api_key_set": bool(key)}
 
 
+class PasswordChangeIn(BaseModel):
+    current: str
+    new: str
+
+
+@app.put("/api/me/password")
+def change_own_password(body: PasswordChangeIn, response: Response, user: dict = CurrentUser):
+    """Cambio password proprio. Richiede quella attuale, invalida le altre sessioni
+    e ri-emette il cookie di QUESTA, altrimenti chi cambia password si sloggherebbe da solo."""
+    _check_password(body.new)
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT password_hash FROM user WHERE id=?", (user["id"],)).fetchone()
+        if not row or not auth.verify_password(body.current, row["password_hash"]):
+            raise HTTPException(403, "password attuale errata")
+        conn.execute("UPDATE user SET password_hash=? WHERE id=?",
+                     (auth.hash_password(body.new), user["id"]))
+        ver = _bump_token_version(conn, user["id"])
+    response.set_cookie("session", auth.create_token(user["id"], ver),
+                        httponly=True, samesite="lax", max_age=auth.EXPIRE_DAYS * 86400)
+    return {"ok": True}
+
+
 # ── Admin: gestione utenti + costi ───────────────────────────────────────────
 @app.get("/api/admin/users")
 def admin_users(user: dict = AdminUser):
@@ -207,6 +249,7 @@ def admin_users(user: dict = AdminUser):
         rows = conn.execute(
             "SELECT u.id, u.email, u.name, u.role, u.is_active, u.created_at, "
             "  (u.api_key IS NOT NULL) AS own_key, "
+            "  (SELECT COUNT(*) FROM presentation p WHERE p.owner=u.id) AS n_decks, "
             "  COALESCE((SELECT SUM(cost_usd) FROM usage_log WHERE user_id=u.id),0) AS cost, "
             "  COALESCE((SELECT SUM(input_tokens+output_tokens) FROM usage_log WHERE user_id=u.id),0) AS tokens "
             "FROM user u ORDER BY u.created_at DESC"
@@ -248,6 +291,77 @@ def admin_set_user(uid: str, body: AdminUserPatch, user: dict = AdminUser):
                 _last_admin_guard()
             conn.execute("UPDATE user SET is_active=? WHERE id=?", (1 if body.is_active else 0, uid))
         return {"ok": True}
+
+
+class AdminUserCreate(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+    role: str = "free"
+
+
+@app.post("/api/admin/users")
+def admin_create_user(body: AdminUserCreate, user: dict = AdminUser):
+    """Crea un utente dal pannello, senza passare dall'autoregistrazione o dalla shell."""
+    email = _clean_email(body.email)
+    _check_password(body.password)
+    if body.role not in ("free", "full", "admin"):
+        raise HTTPException(400, "ruolo non valido")
+    with db.get_conn() as conn:
+        if conn.execute("SELECT 1 FROM user WHERE email=?", (email,)).fetchone():
+            raise HTTPException(409, "email gia registrata")
+        uid = db.new_id()
+        conn.execute(
+            "INSERT INTO user (id, email, password_hash, name, is_active, role, created_at) "
+            "VALUES (?,?,?,?,1,?,?)",
+            (uid, email, auth.hash_password(body.password),
+             body.name.strip() or email.split("@")[0], body.role, db.now_iso()),
+        )
+    return {"ok": True, "id": uid, "email": email}
+
+
+class AdminPasswordIn(BaseModel):
+    password: str
+
+
+@app.put("/api/admin/users/{uid}/password")
+def admin_reset_password(uid: str, body: AdminPasswordIn, user: dict = AdminUser):
+    """Reimposta la password di un altro utente e ne butta giu le sessioni aperte."""
+    _check_password(body.password)
+    with db.get_conn() as conn:
+        if not conn.execute("SELECT 1 FROM user WHERE id=?", (uid,)).fetchone():
+            raise HTTPException(404, "utente non trovato")
+        conn.execute("UPDATE user SET password_hash=? WHERE id=?",
+                     (auth.hash_password(body.password), uid))
+        _bump_token_version(conn, uid)
+    return {"ok": True}
+
+
+@app.delete("/api/admin/users/{uid}")
+def admin_delete_user(uid: str, user: dict = AdminUser):
+    """Cancella un utente e TUTTE le sue deck (slide, run, risposte, voti, cluster).
+    Le righe di usage_log restano: servono a tenere corretto il totale dei costi."""
+    if uid == user["id"]:
+        raise HTTPException(400, "non puoi cancellare te stesso")
+    with db.get_conn() as conn:
+        target = conn.execute("SELECT id, role FROM user WHERE id=?", (uid,)).fetchone()
+        if not target:
+            raise HTTPException(404, "utente non trovato")
+        if target["role"] == "admin":
+            # conta gli ALTRI admin attivi: includere il bersaglio bloccherebbe anche
+            # la cancellazione di un admin gia disattivato
+            n = conn.execute(
+                "SELECT COUNT(*) AS c FROM user WHERE role='admin' AND is_active=1 AND id<>?",
+                (uid,),
+            ).fetchone()["c"]
+            if n < 1:
+                raise HTTPException(400, "non puoi cancellare l'ultimo admin")
+        pids = [r["id"] for r in conn.execute(
+            "SELECT id FROM presentation WHERE owner=?", (uid,)).fetchall()]
+        for pid in pids:
+            _purge_presentation(conn, pid)
+        conn.execute("DELETE FROM user WHERE id=?", (uid,))
+        return {"ok": True, "deleted_decks": len(pids)}
 
 
 def _remap_carry(conn, new_slide_id: str, config_json: str, idmap: dict) -> None:
@@ -1182,36 +1296,44 @@ def delete_slide(slide_id: str, user: dict = CurrentUser):
         return {"ok": True}
 
 
+def _purge_presentation(conn, pid: str) -> tuple[int, int]:
+    """Distrugge una deck e tutto cio che vi pende: slide, run, risposte, voti, cluster,
+    assegnazioni peer. Condivisa fra la cancellazione della deck e quella dell'utente,
+    cosi le due non possono divergere e lasciare orfani."""
+    slide_ids = [
+        r["id"] for r in conn.execute(
+            "SELECT id FROM slide WHERE presentation_id=?", (pid,)
+        ).fetchall()
+    ]
+    run_ids = [
+        r["id"] for r in conn.execute(
+            "SELECT id FROM run WHERE presentation_id=?", (pid,)
+        ).fetchall()
+    ]
+    for rid in run_ids:
+        conn.execute(
+            "DELETE FROM qa_vote WHERE response_id IN (SELECT id FROM response WHERE run_id=?)",
+            (rid,),
+        )
+        conn.execute("DELETE FROM response WHERE run_id=?", (rid,))
+        conn.execute("DELETE FROM run_slide WHERE run_id=?", (rid,))
+        conn.execute("DELETE FROM mc_option WHERE run_id=?", (rid,))
+        conn.execute("DELETE FROM cluster WHERE run_id=?", (rid,))
+        conn.execute("DELETE FROM carry_assign WHERE run_id=?", (rid,))
+    conn.execute("DELETE FROM run WHERE presentation_id=?", (pid,))
+    for sid in slide_ids:
+        conn.execute("DELETE FROM slide WHERE id=?", (sid,))
+    conn.execute("DELETE FROM presentation WHERE id=?", (pid,))
+    return len(slide_ids), len(run_ids)
+
+
 @app.delete("/api/presentations/{pid}")
 def delete_presentation(pid: str, user: dict = CurrentUser):
     """Cancella una deck e TUTTI i dati associati (slide, run, risposte, voti)."""
     with db.get_conn() as conn:
         _check_owner(conn, pid, user)
-        slide_ids = [
-            r["id"] for r in conn.execute(
-                "SELECT id FROM slide WHERE presentation_id=?", (pid,)
-            ).fetchall()
-        ]
-        run_ids = [
-            r["id"] for r in conn.execute(
-                "SELECT id FROM run WHERE presentation_id=?", (pid,)
-            ).fetchall()
-        ]
-        for rid in run_ids:
-            conn.execute(
-                "DELETE FROM qa_vote WHERE response_id IN (SELECT id FROM response WHERE run_id=?)",
-                (rid,),
-            )
-            conn.execute("DELETE FROM response WHERE run_id=?", (rid,))
-            conn.execute("DELETE FROM run_slide WHERE run_id=?", (rid,))
-            conn.execute("DELETE FROM mc_option WHERE run_id=?", (rid,))
-            conn.execute("DELETE FROM cluster WHERE run_id=?", (rid,))
-            conn.execute("DELETE FROM carry_assign WHERE run_id=?", (rid,))
-        conn.execute("DELETE FROM run WHERE presentation_id=?", (pid,))
-        for sid in slide_ids:
-            conn.execute("DELETE FROM slide WHERE id=?", (sid,))
-        conn.execute("DELETE FROM presentation WHERE id=?", (pid,))
-        return {"ok": True, "deleted_slides": len(slide_ids), "deleted_runs": len(run_ids)}
+        n_slides, n_runs = _purge_presentation(conn, pid)
+        return {"ok": True, "deleted_slides": n_slides, "deleted_runs": n_runs}
 
 
 class ReorderIn(BaseModel):
