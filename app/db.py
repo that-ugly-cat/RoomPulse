@@ -6,6 +6,7 @@ Schema con separazione template/esecuzione:
 - run          : una sessione live della deck (active_slide + ciclo di vita)
 - run_slide    : stato per-run-per-slide (pending|open|closed|revealed), creato lazy
 - response     : risposta agganciata a (run_id, slide_id)
+- carry_assign : argstep in modo peer, chi eredita il claim di chi (stabile per token)
 """
 
 import os
@@ -118,6 +119,17 @@ CREATE TABLE IF NOT EXISTS cluster (
     generated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS carry_assign (
+    run_id             TEXT NOT NULL,      -- assegnazione peer per argstep: chi obietta a chi
+    slide_id           TEXT NOT NULL,      -- (stabile per token, così il carry non balla fra un poll e l'altro)
+    token              TEXT NOT NULL,
+    source_response_id TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    PRIMARY KEY (run_id, slide_id, token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_carry_source ON carry_assign(run_id, slide_id, source_response_id);
+
 CREATE TABLE IF NOT EXISTS moonshot_game (
     run_id        TEXT NOT NULL,
     slide_id      TEXT NOT NULL,
@@ -152,6 +164,7 @@ _MIGRATIONS = [
     "ALTER TABLE response ADD COLUMN cluster_id TEXT",  # clustering a un asse (open text)
     "ALTER TABLE slide ADD COLUMN presenter_notes TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE user ADD COLUMN role TEXT NOT NULL DEFAULT 'free'",
+    "ALTER TABLE response ADD COLUMN source_response_id TEXT",  # argstep: la risposta da cui eredita
 ]
 
 

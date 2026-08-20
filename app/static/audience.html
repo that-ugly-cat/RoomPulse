@@ -78,10 +78,25 @@
         display:flex; align-items:center; justify-content:flex-end; padding-right:8px;
         color:#04201f; font-weight:700; font-size:.82rem; min-width:fit-content; }
   .barn { width:34px; text-align:right; color:var(--muted); font-size:.85rem; }
-  .toast { position:fixed; left:50%; bottom:26px; transform:translateX(-50%);
-        background:var(--accent); color:#04201f; padding:11px 20px; border-radius:30px;
-        font-weight:700; opacity:0; transition:.3s; pointer-events:none; }
-  .toast.show { opacity:1; }
+  .toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(16px);
+        background:var(--accent); color:#04201f; padding:14px 26px; border-radius:30px;
+        font-weight:800; font-size:1.05rem; max-width:88vw; text-align:center; line-height:1.25;
+        box-shadow:0 10px 30px rgba(0,0,0,.5); opacity:0; pointer-events:none; z-index:300;
+        transition:opacity .22s ease, transform .22s ease; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.err { background:var(--danger); color:#fff; }
+  .toast .spin { display:inline-block; width:13px; height:13px; margin-right:9px;
+        border:2px solid rgba(4,32,31,.28); border-top-color:#04201f; border-radius:50%;
+        vertical-align:-2px; animation:tspin .7s linear infinite; }
+  @keyframes tspin { to { transform:rotate(360deg); } }
+  /* campi ereditati dalla tappa precedente: contesto, non input */
+  .carry { background:#171b22; border:1px solid var(--bar); border-left:3px solid var(--accent);
+        border-radius:11px; padding:13px 15px; margin:0 0 16px; }
+  .carry .carrytag { display:block; font-size:.64rem; text-transform:uppercase; letter-spacing:.09em;
+        color:var(--accent); margin-bottom:9px; }
+  .carry .carryf + .carryf { margin-top:11px; padding-top:11px; border-top:1px solid #23272f; }
+  .carry .cfl { display:block; font-size:.7rem; color:var(--muted); margin-bottom:3px; }
+  .carry .cfv { line-height:1.4; }
   .connect { position:relative; display:flex; justify-content:space-between; gap:44px; }
   .connect .clines { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:0; }
   .ccol { display:flex; flex-direction:column; gap:10px; flex:1; z-index:1; min-width:0; }
@@ -149,9 +164,25 @@ async function initI18n() {
   $("#lang").value = lang;
 }
 
-function toast(msg) {
-  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 1500);
+let toastTimer = null;
+function toast(msg, opts) {
+  opts = opts || {};
+  const t = $("#toast");
+  t.innerHTML = (opts.spin ? '<span class="spin"></span>' : "") + escapeHtml(msg);
+  t.classList.toggle("err", !!opts.err);
+  t.classList.add("show");
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  if (!opts.sticky) toastTimer = setTimeout(() => t.classList.remove("show"), opts.ms || 2200);
+  // feedback aptico: conferma percepibile anche col telefono in mano, non guardato
+  if (!opts.err && navigator.vibrate) { try { navigator.vibrate(opts.err ? [40,60,40] : 30); } catch {} }
+}
+function toastHide() {
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  $("#toast").classList.remove("show");
+}
+function escapeHtml(x) {
+  return String(x).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 
 function renderJoin() {
@@ -175,7 +206,7 @@ function renderWaiting(title) {
 }
 
 // --- builder di input per-tipo ----------------------------------------------
-function buildInput(s) {
+function buildInput(s, data) {
   const c = s.config || {};
   if (s.type === "mc") {
     const multi = !!c.multi;
@@ -199,7 +230,7 @@ function buildInput(s) {
         const v=$("#newopt").value.trim(); if(!v) return;
         const res=await fetch(`/api/live/${code}/add-option`, {method:"POST",
           headers:{"Content-Type":"application/json"}, body:JSON.stringify({slide_id:s.id, label:v})});
-        if(res.ok){ toast(T.sent); lastSig=""; poll(); } else { toast("Errore"); }
+        if(res.ok){ toast(T.sent); lastSig=""; poll(); } else { toast("Errore", {err:true}); }
       };
     }, get:()=> multi ? (sel.size ? {choices:[...sel]} : null) : (sel ? {choice:sel} : null)};
   }
@@ -231,6 +262,49 @@ function buildInput(s) {
       $("#claim").oninput=chk; $("#just").oninput=chk;
     }, get:()=>{ const a=$("#claim").value.trim(), b=$("#just").value.trim();
                  return (a&&b)?{claim:a, justification:b}:null; }};
+  }
+  if (s.type === "argstep") {
+    const fields  = (c.fields && c.fields.length) ? c.fields : ["claim"];
+    const collect = fields[fields.length - 1];
+    const carried = fields.slice(0, -1);
+    const carry   = (data && data.carry) || null;
+    const labels  = c.labels || {};
+    const ph = { claim:         labels.claim         || T.claim_default,
+                 justification: labels.justification || T.just_default,
+                 objection:     labels.objection     || T.obj_default };
+    const editable = !!c.carry_editable;
+    // nel blocco ereditato serve il NOME del campo, non il prompt dell'input:
+    // "Il tuo criterio" e falso quando il criterio e di qualcun altro
+    const nm = { claim:         labels.claim         || T.field_claim,
+                 justification: labels.justification || T.field_just,
+                 objection:     labels.objection     || T.field_obj };
+    const field = (f, val) => f === "claim"
+      ? `<input class="txt" id="as_${f}" placeholder="${ph[f]}" value="${escapeHtml(val||"")}">`
+      : `<textarea class="txt" id="as_${f}" placeholder="${ph[f]}">${escapeHtml(val||"")}</textarea>`;
+    // ereditati e non modificabili -> contesto in sola lettura; altrimenti campi veri
+    const frozen = carried.length && carry && !editable;
+    let html = "";
+    if (frozen) {
+      html = `<div class="carry"><span class="carrytag">${carry.mode === "peer" ? T.carry_peer : T.carry_yours}</span>` +
+        carried.map(f => `<div class="carryf"><span class="cfl">${nm[f]}</span>
+          <div class="cfv">${escapeHtml(carry.values[f] || "")}</div></div>`).join("") + `</div>`;
+    } else if (carried.length) {
+      if (!carry) html += `<p class="muted" style="margin:0 0 12px">${T.carry_missing}</p>`;
+      html += carried.map(f => field(f, carry ? carry.values[f] : "")).join(`<div style="height:10px"></div>`)
+            + `<div style="height:10px"></div>`;
+    }
+    html += field(collect, "");
+    const need = frozen ? [collect] : fields;
+    return {html, multi: c.single === false, mount(){
+      const chk = () => need.every(f => { const el = $("#as_"+f); return el && el.value.trim(); })
+        ? enable() : disable();
+      need.forEach(f => { const el = $("#as_"+f); if (el) el.oninput = chk; });
+      chk();
+    }, get(){
+      const out = {};
+      fields.forEach(f => { const el = $("#as_"+f); if (el) out[f] = el.value.trim(); });
+      return need.every(f => out[f]) ? out : null;
+    }};
   }
   if (s.type === "ranking") {
     const items = (c.items||[]);
@@ -364,11 +438,11 @@ function renderQaShell(data) {
       <p class="muted" id="qaclosed" style="display:none;margin:10px 0 0">${T.qa_closed_banner}</p></div>
     <div id="qafeed"></div><p class="code">${T.code_label} ${code}</p>`;
   $("#qaadd").onclick = async () => {
-    const v = $("#qaq").value.trim(); if (!v) { toast(T.write_question); return; }
+    const v = $("#qaq").value.trim(); if (!v) { toast(T.write_question, {err:true}); return; }
     const res = await fetch(`/api/live/${code}/respond`, {method:"POST",
       headers:{"Content-Type":"application/json"},
       body: JSON.stringify({slide_id:s.id, token, payload:{text:v}})});
-    if (res.ok) { $("#qaq").value=""; toast(T.qa_sent); poll(); } else { toast("Errore"); }
+    if (res.ok) { $("#qaq").value=""; toast(T.qa_sent); poll(); } else { toast("Errore", {err:true}); }
   };
 }
 
@@ -494,7 +568,7 @@ function updateMoonshot(data) {
 async function msReady() {
   const res = await fetch(`/api/live/${code}/moonshot/ready`, {method:"POST",
     headers:{"Content-Type":"application/json"}, body: JSON.stringify({slide_id:msSlideId, token})});
-  if (res.ok) poll();
+  if (res.ok) { toast(T.sent); poll(); } else { toast("Errore", {err:true}); }
 }
 function msBoost() {
   fetch(`/api/live/${code}/moonshot/boost`, {method:"POST",
@@ -515,7 +589,7 @@ function stopMsTicker() { if (msTicker) { clearInterval(msTicker); msTicker = nu
 
 function renderSlide(data) {
   const s = data.slide;
-  const inp = buildInput(s);
+  const inp = buildInput(s, data);
   getPayload = inp.get;
   root.innerHTML = `<div class="card"><p class="q">${s.question}</p>${inp.html}
       <button class="send" id="send" disabled>${T.send}</button></div>
@@ -552,6 +626,13 @@ function renderResults(data) {
       <span class="pl l">${L.x_left||''}</span><span class="pl r">${L.x_right||''}</span>${dots}</div>`;
   } else if (r.type === "wordcloud") {
     body=r.terms.map(t=>`<span style="font-size:${1+Math.min(2,t.count*0.4)}rem;margin:0 8px">${t.term} <span style="font-size:.65rem;color:var(--muted)">(${t.count})</span></span>`).join("");
+  } else if (r.type === "argstep") {
+    body=(r.rows||[]).map(row=>`<div class="rk"><div style="flex:1">
+        <b>${row.claim}</b>${row.cluster?` <span class="atag">${row.cluster}</span>`:""}
+        ${row.justification?`<div class="muted" style="font-size:.9rem;margin-top:3px">${row.justification}</div>`:""}
+        ${(row.objections||[]).map(o=>`<div style="margin-top:6px;padding-left:14px;font-size:.92rem">↳ ${o.text}${
+            o.tag?` <span class="atag">${o.tag}</span>`:""}</div>`).join("")}
+      </div></div>`).join("") || `<p class="muted">${T.no_answers}</p>`;
   } else if (r.type === "opentext" && r.clustered) {
     body=r.clusters.flatMap(c=>c.items.map(t=>
       `<div class="rk"><div><span>${t}</span> <span class="atag">${c.label}</span></div></div>`
@@ -644,7 +725,7 @@ function bar(name, count, max, correct) {
 
 async function submit(slideId, multi) {
   const payload = getPayload ? getPayload() : null;
-  if (!payload) { toast(T.complete_answer); return; }
+  if (!payload) { toast(T.complete_answer, {err:true}); return; }
   try {
     const res = await fetch(`/api/live/${code}/respond`, {
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -653,10 +734,10 @@ async function submit(slideId, multi) {
       const data = await res.json();
       if (data.quiz) { showQuizResult(data.quiz); return; }   // quiz: esito + lock
       toast(T.sent);
+      const b = $("#send"); if (b) { b.textContent = T.sent; b.disabled = true; }
       if (multi) { lastSig=""; }   // multi: ridisegna form pulito per un nuovo invio
-      else { $("#send").textContent=T.sent; disable(); }
-    } else { const e=await res.json(); toast(e.detail||"Errore"); }
-  } catch { toast(T.offline); }
+    } else { const e=await res.json(); toast(e.detail||"Errore", {err:true}); }
+  } catch { toast(T.offline, {err:true}); }
 }
 
 function showQuizResult(q) {
@@ -687,7 +768,10 @@ async function poll() {
       msGame.destroy(); msGame = null; msSlideId = null; stopMsTicker();
     }
     if (data.status === "waiting") { if (lastSig!=="waiting") renderWaiting(data.title); return; }
-    const sig = `${data.slide.id}:${data.state}`;
+    let sig = `${data.slide.id}:${data.state}`;
+    if (data.slide.type === "argstep") {   // il carry puo materializzarsi dopo il primo poll
+      sig += ":" + ((data.carry && data.carry.source_id) || (data.carry_missing ? "none" : "-"));
+    }
     if (data.slide.type === "qa") {        // qa: shell solo al cambio slide, feed+stato ad ogni poll
       if (data.slide.id !== qaSlideId) { qaSlideId = data.slide.id; renderQaShell(data); }
       updateQaFeed(data.feed, data.state === "open");

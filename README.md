@@ -20,21 +20,28 @@ the deck and sees results update live. Try it live [here](https://roompulse.bora
 
 ## Features
 
-- **10 question types**: single/multiple choice (with quiz mode and participant-added
+- **11 question types**: single/multiple choice (with quiz mode and participant-added
   options), Likert scale, word cloud, 2×2 quadrant, ranking (drag & drop), points
-  allocation, open text, Q&A with upvotes, *claim + justification*, and a random group
-  splitter.
+  allocation, open text, Q&A with upvotes, *claim + justification*, *argument chain*,
+  and a random group splitter.
 - **Donut energizer** — a one-button endless-runner (tap / spacebar) played on the audience's
   phones: dodge the ruins, grab donuts, and everyone's best scores build a live leaderboard.
   A break that *also* produces data — handy when the talk is about attention or human factors.
+- **Argument chain** — build an argument one move at a time across linked slides: first a
+  claim, then the justification for it, then an objection — each stage carrying the previous
+  answers over. The objection stage can hand each participant *someone else's* argument
+  (stable, balanced, never your own), which is what yields several objections on the same
+  claim. The result is a table of claim → justification → objections; objections raised aloud
+  in the room can be typed straight into it.
 - **Quiz mode** — mark correct answers; participants see if they got it right (the answer is
   never leaked before they respond).
 - **Pre/post** — ask the same question before and after your argument and show the shift
   (mean for scales, distribution for choice, centroid arrow for the quadrant).
-- **AI argument clustering** — for *claim + justification* and *open text* questions, an LLM
-  groups the responses into descriptive themes (two axes for claim+justification: the
-  criterion **and** the kind of appeal, with a criterion × appeal matrix). Each presenter
-  uses their own Anthropic API key.
+- **AI argument clustering** — for *claim + justification*, *open text* and *argument chain*
+  questions, an LLM groups the responses into descriptive themes (two axes for
+  claim+justification: the criterion **and** the kind of appeal, with a criterion × appeal
+  matrix; for the argument chain: criterion **and** kind of objection). Each presenter uses
+  their own Anthropic API key.
 - **Live moderation** for free-text answers, **per-owner isolation** (each user only sees
   their own decks), **deck export/import** (JSON) and **data export** (Excel — one sheet per run).
 - **Trilingual UI** — Italian, English, German.

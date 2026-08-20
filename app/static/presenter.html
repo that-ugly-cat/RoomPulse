@@ -42,10 +42,25 @@
         border-radius:8px; padding:11px 15px; margin:0 0 20px; color:#e8d9a8; line-height:1.55; }
   .pnotes .tagn { display:block; font-size:.64rem; text-transform:uppercase; letter-spacing:.09em;
         color:#b59a4a; margin-bottom:4px; }
-  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%); max-width:90vw;
-        background:var(--danger); color:#fff; padding:12px 22px; border-radius:30px;
-        font-weight:700; opacity:0; transition:.3s; pointer-events:none; z-index:200; text-align:center; }
-  .toast.show { opacity:1; }
+  .toast { position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(14px);
+        max-width:90vw; background:var(--accent); color:#04201f; padding:13px 24px; border-radius:30px;
+        font-weight:800; font-size:1.02rem; opacity:0; pointer-events:none; z-index:200; text-align:center;
+        box-shadow:0 10px 30px rgba(0,0,0,.5); transition:opacity .22s ease, transform .22s ease; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.err  { background:var(--danger); color:#fff; }
+  .toast.warn { background:var(--orange); color:#241200; }
+  .toast .spin { display:inline-block; width:13px; height:13px; margin-right:9px;
+        border:2px solid rgba(4,32,31,.28); border-top-color:#04201f; border-radius:50%;
+        vertical-align:-2px; animation:tspin .7s linear infinite; }
+  @keyframes tspin { to { transform:rotate(360deg); } }
+  /* anteprima risultati: controllo LOCALE, non tocca ciò che vede il pubblico */
+  .reshead { display:flex; align-items:center; gap:12px; margin:0 0 14px; }
+  .reshead button { padding:7px 14px; border-radius:20px; cursor:pointer; font-size:.82rem;
+        font-weight:700; background:#1c2027; color:var(--muted); border:1px solid var(--bar); }
+  .reshead button.on { color:var(--accent); border-color:var(--accent); }
+  .reshead .hint { color:var(--muted); font-size:.74rem; letter-spacing:.05em; text-transform:uppercase; }
+  .reshidden { background:var(--card); border:1px dashed var(--bar); border-radius:12px;
+        padding:44px 20px; text-align:center; color:var(--muted); }
   .layout { display:grid; grid-template-columns:1fr; gap:24px; }
   .layout.mod { grid-template-columns:1fr 320px; }
   .barrow { display:flex; align-items:center; gap:14px; margin:14px 0; }
@@ -75,6 +90,18 @@
   .cjust .atag { background:#13343a; color:var(--accent); border-radius:20px;
         padding:2px 11px; font-size:.72rem; white-space:nowrap; }
   .mtitle { font-size:.8rem; color:var(--muted); margin-top:28px; letter-spacing:.08em; text-transform:uppercase; }
+  .objs { margin-top:10px; border-top:1px solid #20242d; padding-top:8px; }
+  .obj { display:flex; justify-content:space-between; gap:12px; align-items:baseline;
+        padding:6px 0 6px 16px; position:relative; }
+  .obj::before { content:"↳"; position:absolute; left:0; color:var(--muted); }
+  .obj .byroom { background:#2a2410; color:var(--orange); border-radius:20px; padding:2px 10px;
+        font-size:.68rem; white-space:nowrap; }
+  .addobj { display:flex; gap:8px; margin-top:9px; }
+  .addobj input { flex:1; background:#181b22; border:1px solid var(--bar); border-radius:8px;
+        padding:8px 11px; color:var(--fg); font-size:.88rem; font-family:inherit; }
+  .addobj button { padding:8px 13px; border-radius:8px; border:1px solid var(--bar);
+        background:#20242d; color:var(--muted); cursor:pointer; font-size:.8rem; white-space:nowrap; }
+  .addobj button:hover { border-color:var(--orange); color:var(--orange); }
   .cmatrix { border-collapse:collapse; margin-top:10px; }
   .cmatrix th, .cmatrix td { border:1px solid var(--bar); padding:7px 12px; text-align:center; font-size:.85rem; }
   .cmatrix th { color:var(--muted); font-weight:600; }
@@ -111,10 +138,33 @@ const pid = params.get("p");
 let state = null;
 let purgeArmed = false, purgeTimer = null;
 
-function toast(msg) {
-  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), 2400);
+let toastTimer = null;
+function toast(msg, opts) {
+  opts = opts || {};
+  const t = $("#toast");
+  t.innerHTML = (opts.spin ? '<span class="spin"></span>' : "") + escapeHtml(msg);
+  t.classList.toggle("err", !!opts.err);
+  t.classList.toggle("warn", !!opts.warn);
+  t.classList.add("show");
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  if (!opts.sticky) toastTimer = setTimeout(() => t.classList.remove("show"), opts.ms || 2400);
 }
+function toastHide() {
+  if (toastTimer) { clearTimeout(toastTimer); toastTimer = null; }
+  $("#toast").classList.remove("show");
+}
+function escapeHtml(x) {
+  return String(x).replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// anteprima risultati sullo schermo del presenter: preferenza locale, persistita.
+// Distinta da reveal (`show_results`), che è ciò che vede il PUBBLICO.
+let peek = localStorage.getItem("rp_peek") !== "0";
+// il poll ridisegna ogni 1.5s: senza questo flag il bottone tornerebbe "Clusterizza"
+// mentre la chiamata LLM e ancora in volo
+let clustering = false;
+let composing = false;   // il docente sta scrivendo: il poll non deve cancellargli il testo
 
 // i18n
 const SUPP = ["it","en","de"];
@@ -225,7 +275,8 @@ function renderMain(slide, st, results, moderation, pair) {
          : (isDonut?T.reopen_game:T.reopen_questions)}</button>`
     : `<button class="primary" id="reveal">${st==="revealed"?T.hide_results:T.show_results}</button>
        <button id="open">${T.reopen_vote}</button>
-       ${(slide.type==="argpoll"||slide.type==="opentext") ? `<button id="clusterbtn">${T.cluster_now}</button>` : ""}`;
+       ${(slide.type==="argpoll"||slide.type==="opentext")
+          ? `<button id="clusterbtn"${clustering?" disabled":""}>${clustering?T.clustering_wait:T.cluster_now}</button>` : ""}`;
   const runCtrls = `<span class="spacer"></span>
        <button class="orange" id="newrun">${T.new_run}</button>
        <button class="orange" id="purge">${T.purge_runs}</button>`;
@@ -236,6 +287,10 @@ function renderMain(slide, st, results, moderation, pair) {
     <p class="meta">${(results&&results.n)||0} ${T.responses_word} · ${T.state_word}: <b>${st}</b></p>
     ${notes}
     <div class="controls">${navCtrls}${typeCtrls}${runCtrls}</div>
+    <div class="reshead">
+      <button id="peek" class="${peek?'on':''}">${(peek ? "\u{1F441} "+T.peek_on : "\u{1F6AB} "+T.peek_off)}</button>
+      <span class="hint">${T.peek_hint}</span>
+    </div>
     <div class="layout ${hasMod?'mod':''}">
       <div id="res"></div>
       ${hasMod?'<div id="mod"></div>':''}
@@ -253,15 +308,30 @@ function renderMain(slide, st, results, moderation, pair) {
   if (slide.type === "argpoll" || slide.type === "opentext") {
     const cb = $("#clusterbtn");
     cb.onclick = async () => {
+      clustering = true;
       cb.disabled = true; cb.textContent = T.clustering_wait;
-      const res = await fetch(`/api/runs/${state.run.id}/cluster`, {method:"POST",
-        headers:{"Content-Type":"application/json"}, body:JSON.stringify({slide_id:slide.id})});
-      if (res.ok) { load(); }
-      else { const e = await res.json(); alert(e.detail || "Errore");
-        cb.disabled = false; cb.textContent = T.cluster_now; }
+      toast(T.clustering_toast, {sticky:true, spin:true});
+      const fail = (detail) => {
+        clustering = false;
+        toast(T.clustering_failed + (detail ? " · " + detail : ""), {err:true, ms:6000});
+      };
+      try {
+        const res = await fetch(`/api/runs/${state.run.id}/cluster`, {method:"POST",
+          headers:{"Content-Type":"application/json"}, body:JSON.stringify({slide_id:slide.id})});
+        if (res.ok) { clustering = false; toast(T.clustering_done); load(); }
+        else { const e = await res.json().catch(()=>({})); fail(e.detail); load(); }
+      } catch { fail(""); load(); }
     };
   }
-  $("#res").innerHTML = pair ? renderComparison(results, pair, slide) : renderResults(results);
+  $("#peek").onclick = () => {
+    peek = !peek; localStorage.setItem("rp_peek", peek ? "1" : "0"); render();
+  };
+  $("#res").innerHTML = peek
+    ? (pair ? renderComparison(results, pair, slide) : renderResults(results))
+    : `<div class="reshidden">${T.peek_hidden_body}
+         <div style="margin-top:10px"><span class="big">${(results&&results.n)||0}</span>
+         <span style="margin-left:6px">${T.responses_word}</span></div></div>`;
+  wireArgstepAdd(slide);
   if (hasMod) renderModeration(moderation);
 }
 
@@ -319,6 +389,33 @@ function renderResults(r) {
     return `<div class="feed">`+r.items.map(it=> r.type==="argpoll"
       ? `<div class="item"><b>${it.claim}</b><div class="just">${it.justification}</div></div>`
       : `<div class="item">${it.text}</div>`).join("")+`</div>`;
+  }
+  if (r.type === "argstep") {
+    if (!r.rows || !r.rows.length) return `<p class="meta">${T.waiting_responses}</p>`;
+    const withObj = r.collect === "objection";
+    const rowHtml = (row, grouped) => `<div class="ccluster">
+      <div class="cchead">${row.claim}${(row.cluster && !grouped)?` <span class="atag">${row.cluster}</span>`:""}</div>
+      ${row.justification?`<div class="cjust"><span>${row.justification}</span></div>`:""}
+      ${withObj ? `<div class="objs">${row.objections.length
+          ? row.objections.map(o=>`<div class="obj"><span>${o.text}</span>
+              <span style="white-space:nowrap">${o.tag?`<span class="atag">${o.tag}</span>`:""}${
+              o.by==="presenter"?` <span class="byroom">${T.argstep_by_room}</span>`:""}</span></div>`).join("")
+          : `<div class="obj" style="color:var(--muted)">${T.argstep_no_obj}</div>`}</div>
+        <div class="addobj"><input class="objin" data-key="${row.key}" placeholder="${T.argstep_add_ph}">
+          <button class="objadd" data-key="${row.key}">+ ${T.argstep_add_obj}</button></div>` : ""}
+    </div>`;
+    let body;
+    if (r.clustered && (r.clusters||[]).length) {
+      body = r.clusters.filter(c=>c.count).map(c =>
+        `<h3 class="mtitle">${c.label} <span style="color:var(--accent)">${c.count}</span></h3>`
+        + r.rows.filter(x=>x.cluster_id===c.id).map(x=>rowHtml(x, true)).join("")).join("")
+        + r.rows.filter(x=>!x.cluster_id).map(x=>rowHtml(x, false)).join("");
+    } else {
+      body = r.rows.map(x=>rowHtml(x, false)).join("");
+    }
+    return body + (r.matrix_cols ? matrixHtml(r, T.matrix_title_obj) : "")
+         + `<p class="meta" style="margin-top:22px">${r.rows.length} ${T.argstep_arguments}${
+             withObj ? ` · ${r.n} ${T.argstep_objections}` : ""}</p>`;
   }
   if (r.type === "qa") {
     if (!r.items.length) return `<p class="meta">${T.waiting_questions}</p>`;
@@ -447,13 +544,13 @@ function connectBipartite(r) {
     ${edges}${nodesL}${nodesR}</svg>`;
 }
 
-function matrixHtml(r) {
+function matrixHtml(r, title) {
   if (!r.matrix_cols || !r.matrix_cols.length) return "";
   const head = `<tr><th></th>${r.matrix_cols.map(c=>`<th>${c}</th>`).join("")}</tr>`;
   const max = Math.max(1, ...r.matrix.flat());
   const body = r.matrix.map((row,i)=>`<tr><th>${r.matrix_rows[i]}</th>${
     row.map(v=>`<td style="background:rgba(22,163,171,${v?(0.15+0.55*v/max).toFixed(2):0})">${v||""}</td>`).join("")}</tr>`).join("");
-  return `<h3 class="mtitle">${T.matrix_title}</h3><table class="cmatrix">${head}${body}</table>`;
+  return `<h3 class="mtitle">${title || T.matrix_title}</h3><table class="cmatrix">${head}${body}</table>`;
 }
 
 function bar(name, count, max, correct) {
@@ -461,6 +558,32 @@ function bar(name, count, max, correct) {
   const fill = correct ? "#3fb950" : "var(--accent)";
   return `<div class="barrow"><span class="name"${correct?' style="color:#3fb950"':''}>${correct?"✓ ":""}${name}</span>
     <span class="bartrack"><span class="barfill" style="width:${pct}%;background:${fill}">${count||""}</span></span></div>`;
+}
+
+// Obiezioni raccolte a voce in aula: entrano nella stessa tabella (e nello stesso
+// clustering) di quelle del pubblico, marcate come provenienti dall'aula.
+function wireArgstepAdd(slide) {
+  const send = async (key, input) => {
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = "";
+    const res = await fetch(`/api/runs/${state.run.id}/argstep/add`, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({slide_id:slide.id, source_response_id:key, text})});
+    if (res.ok) { toast(T.sent); load(); }
+    else { const e = await res.json().catch(()=>({})); toast(e.detail || "Errore", {err:true}); }
+  };
+  $("#res").querySelectorAll(".objin").forEach(inp => {
+    inp.onfocus = () => { composing = true; };
+    inp.onblur  = () => { composing = false; };
+    inp.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); send(inp.dataset.key, inp); } };
+  });
+  $("#res").querySelectorAll(".objadd").forEach(b => {
+    b.onclick = () => {
+      const inp = $("#res").querySelector(`.objin[data-key="${b.dataset.key}"]`);
+      if (inp) send(b.dataset.key, inp);
+    };
+  });
 }
 
 async function activate(slideId) {
@@ -486,7 +609,7 @@ function armPurge() {
   if (!purgeArmed) {
     purgeArmed = true;
     b.classList.add("danger"); b.textContent = T.purge_armed;
-    toast(T.purge_confirm);
+    toast(T.purge_confirm, {warn:true});
     purgeTimer = setTimeout(() => {
       purgeArmed = false;
       const bb = $("#purge"); if (bb) { bb.classList.remove("danger"); bb.textContent = T.purge_runs; }
@@ -499,7 +622,7 @@ function armPurge() {
 async function purgeRuns() {
   const res = await fetch(`/api/presentations/${pid}/runs`, {method:"DELETE"});
   if (res.ok) { const d = await res.json(); toast(`${T.purged_toast} (${d.purged_runs})`); }
-  else { toast("Errore"); }
+  else { toast("Errore", {err:true}); }
   load();
 }
 
@@ -509,7 +632,7 @@ $("#lang").onchange = () => { localStorage.setItem("rp_lang", $("#lang").value);
 
 initI18n().then(() => {
   load();
-  setInterval(load, 1500);
+  setInterval(() => { if (!composing) load(); }, 1500);
 });
 </script>
 </body>

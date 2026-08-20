@@ -104,7 +104,9 @@
 
 <script>
 const $ = (s,r=document)=>r.querySelector(s);
-const TYPES = ["mc","scale","wordcloud","quadrant","ranking","points","opentext","qa","argpoll","groups","connect","donut","moonshot"];
+const TYPES = ["mc","scale","wordcloud","quadrant","ranking","points","opentext","qa","argpoll","argstep","groups","connect","donut","moonshot"];
+const ARGSTEP_CHAIN = ["claim","justification","objection"];
+const argstepStage = (cfg) => Math.min(3, Math.max(1, ((cfg||{}).fields||["claim"]).length));
 let presentations = [];
 let current = null;   // dettaglio presentation selezionata
 let editingId = null; // id slide in modifica (null = modalità aggiunta)
@@ -268,6 +270,16 @@ function slideConfigHtml(s) {
     rows.push(chips(T.groups_label, (c.groups||[]).map(g=>g.name)));
   } else if (s.type === "argpoll") {
     rows.push(`<div class="cfgrow muted">${c.claim_label||T.claim_default} / ${c.justification_label||T.just_default}</div>`);
+  } else if (s.type === "argstep") {
+    const st = argstepStage(c);
+    rows.push(`<div class="cfgrow"><b>${T.argstep_stage}:</b> ${[T.argstep_s1,T.argstep_s2,T.argstep_s3][st-1]}</div>`);
+    if (st > 1) {
+      const src = current.slides.find(x => x.id === c.carry_from);
+      rows.push(`<div class="cfgrow">↪ ${T.argstep_from} ${src ? src.ord+". "+src.question : "—"}</div>`);
+      rows.push(`<div class="cfgrow muted">${c.carry_mode === "peer" ? T.argstep_peer : T.argstep_self}</div>`);
+      if (c.carry_editable) rows.push(`<div class="cfgflag">✓ ${T.argstep_editable}</div>`);
+    }
+    if (c.single !== false) rows.push(`<div class="cfgflag">✓ ${T.argstep_single}</div>`);
   } else if (s.type === "connect") {
     rows.push(chips(T.connect_left, (c.left||[]).map(o=>o.label)));
     rows.push(chips(T.connect_right, (c.right||[]).map(o=>o.label)));
@@ -555,6 +567,60 @@ function renderCfg(pre) {
       <label>${T.just_field_label}</label><input id="ajl" placeholder="${T.just_field_ph}">`;
     if (pre) { v("#acl", pre.claim_label || ""); v("#ajl", pre.justification_label || ""); }
   }
+  else if (t === "argstep") {
+    box.innerHTML = `<label>${T.argstep_stage}</label>
+      <select id="asstage">
+        <option value="1">${T.argstep_s1}</option>
+        <option value="2">${T.argstep_s2}</option>
+        <option value="3">${T.argstep_s3}</option></select>
+      <div id="assrc"></div>
+      <label>${T.label_claim}</label><input id="aslc" placeholder="${T.claim_default}">
+      <div id="asrest"></div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:12px">
+        <input type="checkbox" id="assingle" style="width:auto;margin:0" checked> ${T.argstep_single}</label>`;
+    const stage0 = pre ? argstepStage(pre) : 1;
+    v("#asstage", String(stage0));
+    if (pre) {
+      v("#aslc", (pre.labels||{}).claim || "");
+      $("#assingle").checked = pre.single !== false;
+    }
+    // le etichette vivono qui e non nel DOM: cambiare tappa distrugge i campi,
+    // e chi torna indietro non deve ritrovarsi il testo cancellato
+    const draft = { justification: (pre && (pre.labels||{}).justification) || "",
+                    objection:     (pre && (pre.labels||{}).objection)     || "" };
+    // la sorgente ammessa dipende dalla tappa: deve avere esattamente stage-1 campi
+    const syncStage = () => {
+      const st = Number($("#asstage").value);
+      if ($("#asljl")) draft.justification = $("#asljl").value;
+      if ($("#aslol")) draft.objection     = $("#aslol").value;
+      let rest = "";
+      if (st >= 2) rest += `<label>${T.label_just}</label><input id="asljl" placeholder="${T.just_default}" value="${esc(draft.justification)}">`;
+      if (st >= 3) rest += `<label>${T.label_obj}</label><input id="aslol" placeholder="${T.obj_default}" value="${esc(draft.objection)}">`;
+      $("#asrest").innerHTML = rest;
+      const srcBox = $("#assrc");
+      if (st < 2) { srcBox.innerHTML = ""; return; }
+      const cands = current.slides.filter(x =>
+        x.type === "argstep" && x.id !== editingId && argstepStage(x.config) === st - 1);
+      if (!cands.length) {
+        srcBox.innerHTML = `<p class="muted" style="border-left:3px solid var(--orange);padding-left:10px">${T.argstep_no_source}</p>`;
+        return;
+      }
+      const selSrc = (pre && pre.carry_from) || "";
+      // default: la tappa dell'obiezione punta al claim di QUALCUN ALTRO — e' cio che
+      // produce obiezioni multiple sullo stesso argomento invece di autoconfutazioni
+      const selMode = (pre && pre.carry_mode) || (st >= 3 ? "peer" : "self");
+      srcBox.innerHTML = `<label>${T.argstep_from}</label>
+        <select id="assrcsel">${cands.map(x=>`<option value="${x.id}"${selSrc===x.id?" selected":""}>${x.ord}. ${esc(x.question)}</option>`).join("")}</select>
+        <label>${T.argstep_mode}</label>
+        <select id="asmode">
+          <option value="self"${selMode!=="peer"?" selected":""}>${T.argstep_self}</option>
+          <option value="peer"${selMode==="peer"?" selected":""}>${T.argstep_peer}</option></select>
+        <label style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <input type="checkbox" id="aseditable" style="width:auto;margin:0"${pre&&pre.carry_editable?" checked":""}> ${T.argstep_editable}</label>`;
+    };
+    $("#asstage").onchange = syncStage;
+    syncStage();
+  }
   else if (t === "connect") {
     box.innerHTML = listEditor(T.connect_left, "optsL") + listEditor(T.connect_right, "optsR") +
       `<label>${T.connect_cardinality}</label>
@@ -601,6 +667,20 @@ function buildConfig(t) {
   if (t === "quadrant") return {labels:{x_left:$("#qxl").value, x_right:$("#qxr").value,
                                         y_top:$("#qyt").value, y_bottom:$("#qyb").value}};
   if (t === "argpoll") return {claim_label:$("#acl").value, justification_label:$("#ajl").value};
+  if (t === "argstep") {
+    const st = Number($("#asstage").value);
+    const labels = {claim: $("#aslc").value.trim()};
+    if ($("#asljl")) labels.justification = $("#asljl").value.trim();
+    if ($("#aslol")) labels.objection = $("#aslol").value.trim();
+    return {
+      fields: ARGSTEP_CHAIN.slice(0, st),
+      labels,
+      carry_from: st > 1 && $("#assrcsel") ? ($("#assrcsel").value || null) : null,
+      carry_mode: st > 1 && $("#asmode") ? $("#asmode").value : "self",
+      carry_editable: !!($("#aseditable") && $("#aseditable").checked),
+      single: $("#assingle").checked,
+    };
+  }
   if (t === "connect") return {
     left: getLeft().map((l,i)=>({id:"l"+i, label:l})),
     right: getRight().map((l,i)=>({id:"r"+i, label:l})),
@@ -617,10 +697,11 @@ async function addSlide() {
   if (!question) { alert(T.write_question_alert); return; }
   const pairEl = $("#pairsel");
   const pair_id = pairEl ? (pairEl.value || null) : null;
-  await fetch(`/api/presentations/${current.id}/slides`, {
+  const res = await fetch(`/api/presentations/${current.id}/slides`, {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({type:t, question, config:buildConfig(t), pair_id,
                           presenter_notes: $("#snotes").value.trim()})});
+  if (!res.ok) { const e = await res.json().catch(()=>({})); alert(e.detail || ("Errore (HTTP " + res.status + ")")); return; }
   selectP(current.id);
 }
 

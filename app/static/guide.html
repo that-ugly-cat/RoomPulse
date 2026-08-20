@@ -59,6 +59,7 @@
     <a href="#types">Slide types</a>
     <a href="#surfaces">The three surfaces</a>
     <a href="#run">Running a session</a>
+    <a href="#argstep">Argument chain</a>
     <a href="#prepost">Pre / post</a>
     <a href="#quiz">Quiz mode</a>
     <a href="#groups">Random groups</a>
@@ -119,7 +120,7 @@
       reuse a deck across classes or sessions without mixing the data.</p>
 
     <h2 id="types">Slide types</h2>
-    <p>Eleven question types plus a game. One question is active at a time; the audience sees exactly
+    <p>Twelve question types plus a game. One question is active at a time; the audience sees exactly
       what you activate.</p>
     <table>
       <tr><th>Type</th><th>What the audience does</th><th>How results show</th></tr>
@@ -133,6 +134,9 @@
       <tr><td><b>Open text</b></td><td>Write a free answer.</td><td>Moderated feed.</td></tr>
       <tr><td><b>Q&amp;A + upvote</b></td><td>Ask questions and upvote others'.</td><td>Feed sorted by votes.</td></tr>
       <tr><td><b>Claim + justification</b></td><td>State a criterion and why.</td><td>Paired feed; AI clustering optional.</td></tr>
+      <tr><td><b>Argument chain</b></td><td>Build an argument across up to three linked
+        slides: claim, then justification, then objection.</td><td>A table of claim →
+        justification → objections; AI clustering optional.</td></tr>
       <tr><td><b>Random groups</b></td><td>Get assigned to a balanced group.</td><td>Count per group.</td></tr>
       <tr><td><b>Connections (mapping)</b></td><td>Link items across two columns.</td><td>Left×right heat matrix (+ bipartite graph for you).</td></tr>
       <tr><td><b>Donut</b> <span class="tag">game</span></td><td>Play a one-button runner.</td><td>Live leaderboard + histogram.</td></tr>
@@ -169,6 +173,34 @@
     <p class="muted"><span class="kbd">Purge runs</span> (orange, top-right) wipes every run's data for the
       deck — responses, votes, everything — but keeps the deck and slides. It asks for a second click to
       confirm. Handy to reset a deck before reusing it (and it re-unlocks structural editing).</p>
+
+    <h2 id="argstep">Argument chain</h2>
+    <p>Ask for an argument <b>one move at a time</b>. Add a slide of type <i>Argument chain</i> and
+      pick its stage:</p>
+    <ol>
+      <li><b>Claim only</b> — everyone states a criterion.</li>
+      <li><b>Claim + justification</b> — the claim is carried over from stage 1 and shown above the
+        box; they only write the reason.</li>
+      <li><b>Claim + justification + objection</b> — both are carried over; they only write the
+        objection.</li>
+    </ol>
+    <p>Stages 2 and 3 must point at the stage right before them, in the same deck. Each participant
+      answers <b>once</b> per stage by default (they can correct their answer while the stage is open).</p>
+    <p><b>The choice that changes the exercise</b> is <i>which argument you respond to</i>:</p>
+    <ul>
+      <li><b>Your own</b> — you object to the claim you yourself defended. Self-refutation; one
+        objection per argument.</li>
+      <li><b>Someone else's</b> — you are handed another participant's claim and justification,
+        anonymously. This is the default for the objection stage, and the only way to get
+        <b>several objections on the same argument</b>. Assignment is stable and balanced: the
+        argument that has attracted the fewest objections is handed out next, and never your own.</li>
+    </ul>
+    <p>The presenter view shows the result as a table — one block per argument, with its objections
+      nested underneath. If an objection is <b>said out loud in the room</b> rather than typed, type it
+      into the box under that argument: it joins the same table, tagged <i>room</i>, and is clustered
+      with the rest.</p>
+    <p>Someone who joins late and has no earlier answer is not blocked: the inherited fields simply
+      become writable for them.</p>
 
     <h2 id="prepost">Pre / post</h2>
     <p>Ask the <b>same question before and after</b> your argument and show how the room moved. When
@@ -212,9 +244,11 @@
       close it the full leaderboard shows.</p>
 
     <h2 id="clustering">AI argument clustering</h2>
-    <p>For <b>Claim + justification</b> and <b>Open text</b>, an LLM can group free responses into
-      descriptive themes — for claim+justification along two axes (the criterion <b>and</b> the kind of
-      appeal, with a criterion × appeal matrix). It's descriptive, never evaluative.</p>
+    <p>For <b>Claim + justification</b>, <b>Open text</b> and the <b>Argument chain</b>, an LLM can
+      group free responses into descriptive themes — for claim+justification along two axes (the
+      criterion <b>and</b> the kind of appeal, with a criterion × appeal matrix), and for the final
+      stage of an argument chain along criterion <b>and kind of objection</b>, with a criterion ×
+      objection matrix. It's descriptive, never evaluative.</p>
     <p><b>Which key it uses depends on your tier:</b></p>
     <ul>
       <li><b>Free</b> — bring your own Anthropic API key: editor → <span class="kbd">⚙</span> → paste it

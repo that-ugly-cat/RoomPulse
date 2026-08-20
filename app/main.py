@@ -250,6 +250,17 @@ def admin_set_user(uid: str, body: AdminUserPatch, user: dict = AdminUser):
         return {"ok": True}
 
 
+def _remap_carry(conn, new_slide_id: str, config_json: str, idmap: dict) -> None:
+    """argstep: `carry_from` e un id di slide, quindi dopo un clone o un import va
+    rimappato ai nuovi id esattamente come `pair_id`. Se la sorgente non e nella deck
+    la catena resta scollegata (campi editabili a runtime) invece di puntare nel vuoto."""
+    cfg = json.loads(config_json)
+    if not cfg.get("carry_from"):
+        return
+    cfg["carry_from"] = idmap.get(cfg["carry_from"])
+    conn.execute("UPDATE slide SET config=? WHERE id=?", (json.dumps(cfg), new_slide_id))
+
+
 def _clone_presentation(conn, source_pid: str, owner: str) -> str:
     """Duplica una deck (slide + config + note + pair, niente run) in un nuovo account."""
     src = conn.execute("SELECT * FROM presentation WHERE id=?", (source_pid,)).fetchone()
@@ -270,9 +281,11 @@ def _clone_presentation(conn, source_pid: str, owner: str) -> str:
             (nid, new_pid, s["ord"], s["type"], s["question"], s["config"], s["presenter_notes"]),
         )
         idmap[s["id"]] = nid
-    for s in slides:  # remap pre/post ai nuovi id
+    for s in slides:  # remap pre/post e catena argstep ai nuovi id
         if s["pair_id"] and s["pair_id"] in idmap:
             conn.execute("UPDATE slide SET pair_id=? WHERE id=?", (idmap[s["pair_id"]], idmap[s["id"]]))
+        if s["type"] == "argstep":
+            _remap_carry(conn, idmap[s["id"]], s["config"], idmap)
     return new_pid
 
 
@@ -382,6 +395,8 @@ def _mc_results(conn, run_id: str, slide) -> dict:
 
 
 def _results(conn, run_id: str, slide) -> dict:
+    if slide["type"] == "argstep":
+        return _argstep_results(conn, run_id, slide)
     if slide["type"] == "qa":
         return _qa_results(conn, run_id, slide["id"])
     if slide["type"] == "mc":
@@ -406,6 +421,172 @@ def _results(conn, run_id: str, slide) -> dict:
         (run_id, slide["id"]),
     ).fetchall()
     return aggregate(slide["type"], json.loads(slide["config"]), rows)
+
+
+# --- argstep: la catena claim -> justification -> objection -------------------
+# Tre slide distinte, non tre fasi di una sola: cosi ogni tappa ha il suo stato
+# open/closed/revealed, la sua coda di moderazione e il suo momento di reveal.
+# Il payload della tappa N porta con se una COPIA dei campi delle tappe precedenti,
+# quindi la tappa finale contiene da sola l'argomento intero: si clusterizza li, una volta.
+ARGSTEP_CHAIN = ("claim", "justification", "objection")
+
+
+def _argstep_fields(cfg: dict) -> list:
+    """La catena e canonica e ordinata: di `fields` conta solo la LUNGHEZZA.
+    Cosi una config malformata degrada a un prefisso valido invece di rompere."""
+    n = max(1, min(len(ARGSTEP_CHAIN), len(cfg.get("fields") or [])))
+    return list(ARGSTEP_CHAIN[:n])
+
+
+def _peer_source(conn, run_id: str, slide_id: str, src_id: str, token: str):
+    """Assegna a `token` la risposta di QUALCUN ALTRO sulla slide sorgente, e la memorizza:
+    deve restare stabile fra un poll e l'altro. Bilanciata: vince quella che ha
+    ricevuto meno obiezioni finora."""
+    ex = conn.execute(
+        "SELECT source_response_id FROM carry_assign WHERE run_id=? AND slide_id=? AND token=?",
+        (run_id, slide_id, token),
+    ).fetchone()
+    if ex:
+        row = conn.execute(
+            "SELECT id, payload FROM response WHERE id=? AND status='visible'",
+            (ex["source_response_id"],),
+        ).fetchone()
+        if row:
+            return row
+        # sorgente nascosta dalla moderazione, o sostituita dall'upsert del voto singolo
+        conn.execute(
+            "DELETE FROM carry_assign WHERE run_id=? AND slide_id=? AND token=?",
+            (run_id, slide_id, token),
+        )
+    pool = conn.execute(
+        "SELECT id, payload FROM response WHERE run_id=? AND slide_id=? AND status='visible' "
+        "AND participant_token<>? ORDER BY created_at",
+        (run_id, src_id, token),
+    ).fetchall()
+    if not pool:
+        return None
+    load = {
+        r["source_response_id"]: r["n"]
+        for r in conn.execute(
+            "SELECT source_response_id, COUNT(*) AS n FROM carry_assign "
+            "WHERE run_id=? AND slide_id=? GROUP BY source_response_id",
+            (run_id, slide_id),
+        ).fetchall()
+    }
+    chosen = min(pool, key=lambda r: (load.get(r["id"], 0), r["id"]))  # tie-break stabile
+    conn.execute(
+        "INSERT OR REPLACE INTO carry_assign "
+        "(run_id, slide_id, token, source_response_id, created_at) VALUES (?,?,?,?,?)",
+        (run_id, slide_id, token, chosen["id"], db.now_iso()),
+    )
+    return chosen
+
+
+def _resolve_carry(conn, run_id: str, slide, token: str | None) -> dict | None:
+    """Cosa questa slide eredita dalla precedente, per questo token. None se non c'e ancora."""
+    cfg = json.loads(slide["config"])
+    src_id = cfg.get("carry_from")
+    carried = _argstep_fields(cfg)[:-1]
+    if not src_id or not carried or not token:
+        return None
+    mode = "peer" if cfg.get("carry_mode") == "peer" else "self"
+    if mode == "peer":
+        row = _peer_source(conn, run_id, slide["id"], src_id, token)
+    else:
+        row = conn.execute(
+            "SELECT id, payload FROM response WHERE run_id=? AND slide_id=? AND participant_token=? "
+            "AND status='visible' ORDER BY created_at DESC LIMIT 1",
+            (run_id, src_id, token),
+        ).fetchone()
+    if not row:
+        return None
+    p = json.loads(row["payload"])
+    return {"values": {f: p.get(f, "") for f in carried}, "source_id": row["id"], "mode": mode}
+
+
+def _argstep_results(conn, run_id: str, slide) -> dict:
+    """Lo stato finale che serve in aula: UNA RIGA PER ARGOMENTO, con le obiezioni
+    (al plurale) raccolte sotto. Il raggruppamento e per risposta ereditata, quindi in
+    modo peer piu persone che obiettano allo stesso claim finiscono nella stessa riga."""
+    cfg = json.loads(slide["config"])
+    fields = _argstep_fields(cfg)
+    collect = fields[-1]
+    sid = slide["id"]
+    clabels = {
+        c["id"]: c["label"]
+        for c in conn.execute(
+            "SELECT id, label FROM cluster WHERE run_id=? AND slide_id=?", (run_id, sid)
+        ).fetchall()
+    }
+    claim_cl = conn.execute(
+        "SELECT id, label FROM cluster WHERE run_id=? AND slide_id=? AND kind='claim' ORDER BY ord",
+        (run_id, sid),
+    ).fetchall()
+    arg_cl = conn.execute(
+        "SELECT id, label FROM cluster WHERE run_id=? AND slide_id=? AND kind='arg' ORDER BY ord",
+        (run_id, sid),
+    ).fetchall()
+    rows = conn.execute(
+        "SELECT id, payload, source_response_id, claim_cluster_id, arg_cluster_id "
+        "FROM response WHERE run_id=? AND slide_id=? AND status='visible' ORDER BY created_at",
+        (run_id, sid),
+    ).fetchall()
+
+    out: list = []
+    index: dict = {}
+    matrix: dict = {(c["id"], a["id"]): 0 for c in claim_cl for a in arg_cl}
+    for r in rows:
+        p = json.loads(r["payload"])
+        # chiave di raggruppamento: la risposta ereditata; senza carry, la risposta stessa
+        key = r["source_response_id"] or r["id"]
+        row = index.get(key)
+        if row is None:
+            row = {
+                "key": key,
+                "claim": p.get("claim", ""),
+                "justification": p.get("justification", ""),
+                "cluster": "",
+                "cluster_id": None,
+                "objections": [],
+            }
+            index[key] = row
+            out.append(row)
+        if not row["cluster_id"] and r["claim_cluster_id"]:
+            # il claim e lo stesso per tutta la riga: basta la prima assegnazione non vuota
+            row["cluster_id"] = r["claim_cluster_id"]
+            row["cluster"] = clabels.get(r["claim_cluster_id"], "")
+        if collect == "objection":
+            row["objections"].append({
+                "id": r["id"],
+                "text": p.get("objection", ""),
+                "by": p.get("by") or "",
+                "tag": clabels.get(r["arg_cluster_id"], ""),
+            })
+        if (r["claim_cluster_id"], r["arg_cluster_id"]) in matrix:
+            matrix[(r["claim_cluster_id"], r["arg_cluster_id"])] += 1
+
+    order = {c["id"]: i for i, c in enumerate(claim_cl)}
+    out.sort(key=lambda x: (order.get(x["cluster_id"], 10**6), -len(x["objections"])))
+    res = {
+        "type": "argstep",
+        "n": len(rows),
+        "fields": fields,
+        "collect": collect,
+        "labels": cfg.get("labels") or {},
+        "carry_mode": "peer" if cfg.get("carry_mode") == "peer" else "self",
+        "rows": out,
+        "clustered": bool(claim_cl),
+        "clusters": [
+            {"id": c["id"], "label": c["label"],
+             "count": sum(1 for r in out if r["cluster_id"] == c["id"])}
+            for c in claim_cl
+        ],
+    }
+    if claim_cl and arg_cl:  # matrice claim x tipo di obiezione, stessa forma di argpoll
+        res["matrix"] = [[matrix[(c["id"], a["id"])] for a in arg_cl] for c in claim_cl]
+        res["matrix_rows"] = [c["label"] for c in claim_cl]
+        res["matrix_cols"] = [a["label"] for a in arg_cl]
+    return res
 
 
 def _argpoll_clustered(conn, run_id: str, slide_id: str) -> dict:
@@ -583,12 +764,13 @@ def _moderation(conn, run_id: str, slide_id: str) -> list:
     out = []
     for r in rows:
         p = json.loads(r["payload"])
-        text = p.get("text") or p.get("claim") or ""
+        # argstep: si modera cio che questa tappa ha raccolto (l'obiezione, non il claim ereditato)
+        text = p.get("objection") or p.get("text") or p.get("claim") or ""
         out.append(
             {
                 "id": r["id"],
                 "text": text,
-                "justification": p.get("justification"),
+                "justification": p.get("claim") if p.get("objection") else p.get("justification"),
                 "status": r["status"],
             }
         )
@@ -666,6 +848,28 @@ def create_presentation(body: PresentationIn, user: dict = CurrentUser):
         return {"id": pid, "title": body.title, "join_code": code}
 
 
+def _validate_argstep(conn, pid: str, cfg: dict, self_id: str | None = None) -> None:
+    """La tappa N puo ereditare solo da una slide argstep di questa deck con esattamente
+    N-1 campi. Senza questo vincolo il carryover produrrebbe campi vuoti a runtime."""
+    n = len(_argstep_fields(cfg))
+    src = cfg.get("carry_from")
+    if n == 1:
+        if src:
+            raise HTTPException(400, "la prima tappa non eredita nulla")
+        return
+    if not src:
+        raise HTTPException(400, "tappa oltre la prima: serve la slide da cui ereditare")
+    if src == self_id:
+        raise HTTPException(400, "una tappa non puo ereditare da se stessa")
+    row = conn.execute(
+        "SELECT type, config FROM slide WHERE id=? AND presentation_id=?", (src, pid)
+    ).fetchone()
+    if not row or row["type"] != "argstep":
+        raise HTTPException(400, "la slide sorgente non esiste o non e una tappa argomentativa")
+    if len(_argstep_fields(json.loads(row["config"]))) != n - 1:
+        raise HTTPException(400, f"la sorgente deve avere {n - 1} campi, non di piu ne di meno")
+
+
 class SlideIn(BaseModel):
     type: str
     question: str
@@ -689,6 +893,8 @@ def add_slide(pid: str, body: SlideIn, user: dict = CurrentUser):
                 raise HTTPException(
                     400, "pre/post consentito solo tra slide dello stesso tipo (scale/mc/quadrant)"
                 )
+        if body.type == "argstep":
+            _validate_argstep(conn, pid, body.config)
         ord_row = conn.execute(
             "SELECT COALESCE(MAX(ord), 0) + 1 AS n FROM slide WHERE presentation_id=?",
             (pid,),
@@ -746,6 +952,12 @@ def edit_slide(slide_id: str, body: SlideEdit, user: dict = CurrentUser):
                 raise HTTPException(
                     400, "pre/post consentito solo tra slide dello stesso tipo (scale/mc/quadrant)"
                 )
+        if slide["type"] == "argstep":
+            _validate_argstep(
+                conn, pid,
+                body.config if body.config is not None else json.loads(slide["config"]),
+                slide_id,
+            )
         q = body.question if body.question is not None else slide["question"]
         cfg = json.dumps(body.config) if body.config is not None else slide["config"]
         notes = body.presenter_notes if body.presenter_notes is not None else slide["presenter_notes"]
@@ -795,6 +1007,7 @@ def purge_runs(pid: str, user: dict = CurrentUser):
             conn.execute("DELETE FROM run_slide WHERE run_id=?", (rid,))
             conn.execute("DELETE FROM mc_option WHERE run_id=?", (rid,))
             conn.execute("DELETE FROM cluster WHERE run_id=?", (rid,))
+            conn.execute("DELETE FROM carry_assign WHERE run_id=?", (rid,))
         conn.execute("UPDATE presentation SET active_run_id=NULL WHERE id=?", (pid,))
         conn.execute("DELETE FROM run WHERE presentation_id=?", (pid,))
         return {"ok": True, "purged_runs": len(run_ids)}
@@ -953,8 +1166,18 @@ def delete_slide(slide_id: str, user: dict = CurrentUser):
         conn.execute("DELETE FROM cluster WHERE slide_id=?", (slide_id,))
         conn.execute("DELETE FROM response WHERE slide_id=?", (slide_id,))
         conn.execute("DELETE FROM run_slide WHERE slide_id=?", (slide_id,))
+        conn.execute("DELETE FROM carry_assign WHERE slide_id=?", (slide_id,))
         # scollega eventuali coppie pre/post che puntavano a questa slide
         conn.execute("UPDATE slide SET pair_id=NULL WHERE pair_id=?", (slide_id,))
+        # e le tappe argstep che ereditavano da questa: meglio scollegate che penzolanti
+        for row in conn.execute(
+            "SELECT id, config FROM slide WHERE presentation_id=? AND type='argstep'",
+            (_pid_of_slide(conn, slide_id),),
+        ).fetchall():
+            cfg = json.loads(row["config"])
+            if cfg.get("carry_from") == slide_id:
+                cfg["carry_from"] = None
+                conn.execute("UPDATE slide SET config=? WHERE id=?", (json.dumps(cfg), row["id"]))
         conn.execute("DELETE FROM slide WHERE id=?", (slide_id,))
         return {"ok": True}
 
@@ -983,6 +1206,7 @@ def delete_presentation(pid: str, user: dict = CurrentUser):
             conn.execute("DELETE FROM run_slide WHERE run_id=?", (rid,))
             conn.execute("DELETE FROM mc_option WHERE run_id=?", (rid,))
             conn.execute("DELETE FROM cluster WHERE run_id=?", (rid,))
+            conn.execute("DELETE FROM carry_assign WHERE run_id=?", (rid,))
         conn.execute("DELETE FROM run WHERE presentation_id=?", (pid,))
         for sid in slide_ids:
             conn.execute("DELETE FROM slide WHERE id=?", (sid,))
@@ -1079,6 +1303,8 @@ def import_deck(body: ImportDeck, user: dict = CurrentUser):
                 conn.execute(
                     "UPDATE slide SET pair_id=? WHERE id=?", (refmap[s.pair_ref], new_ids[i])
                 )
+            if s.type == "argstep":
+                _remap_carry(conn, new_ids[i], json.dumps(s.config), refmap)
         return {"id": pid, "title": body.title, "join_code": code, "n_slides": len(body.slides)}
 
 
@@ -1102,13 +1328,14 @@ def _fmt_answer(stype: str, p: dict, optmap: dict) -> str:
         return p.get("group_name", "")
     if stype == "donut":
         return str(p.get("score", ""))
-    if stype == "argpoll":
-        return ""  # claim/justification vanno nelle loro colonne
+    if stype in ("argpoll", "argstep"):
+        return ""  # claim/justification/objection vanno nelle loro colonne
     return json.dumps(p, ensure_ascii=False)
 
 
 _EXPORT_HEADER = ["slide_ord", "slide_type", "question", "participant", "created_at",
-                  "status", "claim", "justification", "answer", "cluster", "arg_cluster"]
+                  "status", "claim", "justification", "objection", "answer", "cluster",
+                  "arg_cluster", "carry_source"]
 
 
 def _run_export_rows(conn, rid: str, slides) -> list[list]:
@@ -1136,19 +1363,22 @@ def _run_export_rows(conn, rid: str, slides) -> list[list]:
                 optmap[o["id"]] = o["label"]
         rows = conn.execute(
             "SELECT participant_token, payload, status, created_at, "
-            "claim_cluster_id, arg_cluster_id, cluster_id FROM response "
+            "claim_cluster_id, arg_cluster_id, cluster_id, source_response_id FROM response "
             "WHERE run_id=? AND slide_id=? ORDER BY created_at",
             (rid, s["id"]),
         ).fetchall()
         for r in rows:
             p = json.loads(r["payload"])
-            claim = p.get("claim", "") if s["type"] == "argpoll" else ""
-            just = p.get("justification", "") if s["type"] == "argpoll" else ""
+            argy = s["type"] in ("argpoll", "argstep")
+            claim = p.get("claim", "") if argy else ""
+            just = p.get("justification", "") if argy else ""
+            obj = p.get("objection", "") if argy else ""
             primary = clabels.get(r["claim_cluster_id"]) or clabels.get(r["cluster_id"]) or ""
             argc = clabels.get(r["arg_cluster_id"]) or ""
             out.append([s["ord"], s["type"], s["question"], r["participant_token"],
-                        r["created_at"], r["status"], claim, just,
-                        _fmt_answer(s["type"], p, optmap), primary, argc])
+                        r["created_at"], r["status"], claim, just, obj,
+                        _fmt_answer(s["type"], p, optmap), primary, argc,
+                        r["source_response_id"] or ""])
     return out
 
 
@@ -1251,6 +1481,16 @@ def live(code: str, t: str | None = None):
         if slide["type"] == "moonshot":
             _ensure_moonshot_lobby(conn, rid, active)
             payload["moonshot"] = _moonshot_state(conn, rid, slide, t)
+        if slide["type"] == "argstep":
+            cfg = payload["slide"]["config"]
+            cfg["fields"] = _argstep_fields(cfg)
+            carry = _resolve_carry(conn, rid, slide, t)
+            if carry:
+                payload["carry"] = carry
+            elif cfg.get("carry_from"):
+                # arrivato tardi (o nessun peer disponibile): i campi ereditati
+                # diventano scrivibili invece di bloccare la partecipazione
+                payload["carry_missing"] = True
         if slide["type"] == "mc":
             # mc: opzioni base + quelle aggiunte dai partecipanti (allow_other)
             cfg = payload["slide"]["config"]
@@ -1408,8 +1648,41 @@ def respond(code: str, body: RespondIn):
                 )
             return {"ok": True, "best": payload["score"]}
 
-        # voto singolo → upsert: rimuovo il voto precedente di questo token
-        if slide["type"] in SINGLE_VOTE_TYPES:
+        # argstep: i campi ereditati li decide il SERVER, non il client (a meno che la
+        # slide non li dichiari editabili), e vengono congelati nel payload al momento
+        # dell'invio. Da li in poi la risposta e autosufficiente.
+        if slide["type"] == "argstep":
+            cfg = json.loads(slide["config"])
+            fields = _argstep_fields(cfg)
+            collect = fields[-1]
+            val = str(body.payload.get(collect) or "").strip()
+            if not val:
+                raise HTTPException(400, f"campo '{collect}' vuoto")
+            carry = _resolve_carry(conn, rid, slide, body.token)
+            editable = bool(cfg.get("carry_editable"))
+            out = {collect: val}
+            for f in fields[:-1]:
+                sent = str(body.payload.get(f) or "").strip()
+                inherited = carry["values"].get(f, "") if carry else ""
+                out[f] = inherited if (inherited and not editable) else (sent or inherited)
+                if not out[f]:
+                    raise HTTPException(400, f"campo '{f}' mancante")
+            src = carry["source_id"] if carry else None
+            if cfg.get("single", True):
+                conn.execute(
+                    "DELETE FROM response WHERE run_id=? AND slide_id=? AND participant_token=?",
+                    (rid, body.slide_id, body.token),
+                )
+            conn.execute(
+                "INSERT INTO response (id, run_id, slide_id, participant_token, payload, "
+                "source_response_id, created_at) VALUES (?,?,?,?,?,?,?)",
+                (db.new_id(), rid, body.slide_id, body.token, json.dumps(out), src, db.now_iso()),
+            )
+            return {"ok": True, "single": bool(cfg.get("single", True))}
+
+        # voto singolo → upsert: rimuovo il voto precedente di questo token.
+        # `config.single` lo rende disponibile anche ai tipi testuali (opentext, argpoll).
+        if slide["type"] in SINGLE_VOTE_TYPES or json.loads(slide["config"]).get("single"):
             conn.execute(
                 "DELETE FROM response WHERE run_id=? AND slide_id=? AND participant_token=?",
                 (rid, body.slide_id, body.token),
@@ -1717,7 +1990,7 @@ def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
             if not key:
                 raise HTTPException(400, "API key non configurata")
         slide = conn.execute("SELECT * FROM slide WHERE id=?", (body.slide_id,)).fetchone()
-        if not slide or slide["type"] not in ("argpoll", "opentext"):
+        if not slide or slide["type"] not in ("argpoll", "opentext", "argstep"):
             raise HTTPException(404, "slide non valida")
         rows = conn.execute(
             "SELECT payload FROM response WHERE run_id=? AND slide_id=? AND status='visible' "
@@ -1728,7 +2001,27 @@ def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
             raise HTTPException(400, "servono almeno 2 risposte per clusterizzare")
         question = slide["question"]
         try:
-            if slide["type"] == "argpoll":
+            if slide["type"] == "argstep":
+                # la tappa finale porta tutti e tre i campi: gli assi sono claim x obiezione.
+                # Le tappe intermedie ricadono sui prompt gia esistenti.
+                fields = _argstep_fields(json.loads(slide["config"]))
+                payloads = [json.loads(r["payload"]) for r in rows]
+                if len(fields) >= 3:
+                    recs = [{"n": i, "claim": p.get("claim", ""),
+                             "justification": p.get("justification", ""),
+                             "objection": p.get("objection", "")}
+                            for i, p in enumerate(payloads, start=1)]
+                    result, usage = clustering.cluster_argstep_full(key, question, recs)
+                elif len(fields) == 2:
+                    recs = [{"n": i, "claim": p.get("claim", ""),
+                             "justification": p.get("justification", "")}
+                            for i, p in enumerate(payloads, start=1)]
+                    result, usage = clustering.cluster_argpoll(key, question, recs)
+                else:
+                    recs = [{"n": i, "text": p.get("claim", "")}
+                            for i, p in enumerate(payloads, start=1)]
+                    result, usage = clustering.cluster_argstep_claims(key, question, recs)
+            elif slide["type"] == "argpoll":
                 pairs = []
                 for i, r in enumerate(rows, start=1):
                     p = json.loads(r["payload"])
@@ -1743,11 +2036,58 @@ def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
             raise HTTPException(502, f"clustering fallito: {e}")
         if central:  # traccia il consumo della chiave centrale (cost tracking per-utente)
             _record_usage(conn, user["id"], rid, body.slide_id, slide["type"], usage)
+        if slide["type"] == "argstep":
+            _materialize_clusters(conn, rid, body.slide_id, result)
+            return _argstep_results(conn, rid, slide)
         if slide["type"] == "argpoll":
             _materialize_clusters(conn, rid, body.slide_id, result)
             return _argpoll_clustered(conn, rid, body.slide_id)
         _materialize_text_clusters(conn, rid, body.slide_id, result)
         return _opentext_clustered(conn, rid, body.slide_id)
+
+
+class ArgstepAddIn(BaseModel):
+    slide_id: str
+    source_response_id: str       # a quale riga della tabella si attacca l'obiezione
+    text: str
+
+
+@app.post("/api/runs/{rid}/argstep/add")
+def argstep_add(rid: str, body: ArgstepAddIn, user: dict = CurrentUser):
+    """Il docente trascrive un'obiezione arrivata a voce dall'aula. Entra nella stessa
+    tabella e nello stesso clustering delle altre, marcata `by: presenter`.
+    Token usa e getta: non deve sovrascrivere le precedenti aggiunte del docente."""
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(400, "obiezione vuota")
+    with db.get_conn() as conn:
+        _check_owner(conn, _pid_of_run(conn, rid), user)
+        slide = conn.execute("SELECT * FROM slide WHERE id=?", (body.slide_id,)).fetchone()
+        if not slide or slide["type"] != "argstep":
+            raise HTTPException(404, "slide non valida")
+        fields = _argstep_fields(json.loads(slide["config"]))
+        if fields[-1] != "objection":
+            raise HTTPException(400, "questa tappa non raccoglie obiezioni")
+        src = conn.execute(
+            "SELECT id, payload FROM response WHERE id=? AND run_id=?",
+            (body.source_response_id, rid),
+        ).fetchone()
+        if not src:
+            raise HTTPException(404, "riga sorgente non trovata")
+        sp = json.loads(src["payload"])
+        payload = {
+            "claim": sp.get("claim", ""),
+            "justification": sp.get("justification", ""),
+            "objection": text,
+            "by": "presenter",
+        }
+        conn.execute(
+            "INSERT INTO response (id, run_id, slide_id, participant_token, payload, "
+            "source_response_id, created_at) VALUES (?,?,?,?,?,?,?)",
+            (db.new_id(), rid, body.slide_id, "presenter:" + db.new_id(),
+             json.dumps(payload), src["id"], db.now_iso()),
+        )
+        return {"ok": True}
 
 
 @app.get("/api/live/{code}/results")

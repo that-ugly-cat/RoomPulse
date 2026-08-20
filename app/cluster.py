@@ -112,3 +112,64 @@ def cluster_opentext(api_key: str, question: str, texts: list):
     data, usage = _call(api_key, SYSTEM_OPENTEXT, _build_opentext_msg(question, texts))
     data.setdefault("clusters", [])
     return data, usage
+
+
+# --- argstep -----------------------------------------------------------------
+# La catena claim → justification → objection. La tappa finale porta con sé tutti e
+# tre i campi (payload denormalizzato), quindi si clusterizza una volta sola, qui.
+# Entrambi i prompt restituiscono la STESSA forma di cluster_argpoll, così il
+# materializzatore in main.py è uno solo.
+
+SYSTEM_ARGSTEP_CLAIMS = """You are an argumentation analyst. You receive a QUESTION and a numbered list of CLAIMS proposed by participants.
+
+Group the CLAIMS by substantive criterion. The label should express the criterion in a short, neutral form, for example: "Maximize aggregate benefit", "Protect vulnerable people". Group by what is claimed, not by wording, tone, or level of detail. NEVER use evaluative terms such as "fallacious", "circular", "weak", "valid", "unethical", "right", or "wrong". Aim for 4–8 groups.
+
+Then assign EACH claim, identified by its number, to exactly one group.
+
+Write all labels in the same language as the claims. Do not infer the output language from this prompt.
+Return ONLY valid JSON, with no text before or after it, using exactly this format:
+{
+  "claim_clusters": [{"id": "c1", "label": "..."}],
+  "arg_clusters": [],
+  "assignments": [{"n": 1, "claim": "c1"}]
+}"""
+
+
+SYSTEM_ARGSTEP_FULL = """You are an argumentation analyst. You receive a numbered list of argument records. Each record contains a CLAIM (a proposed criterion), the JUSTIFICATION given for it, and an OBJECTION raised against it.
+
+Produce TWO distinct groupings, both DESCRIPTIVE and never evaluative:
+
+1. claim_clusters — group the CLAIMS by substantive criterion. The label should express the criterion in a short, neutral form, for example: "Maximize aggregate benefit", "Protect vulnerable people".
+2. arg_clusters — group the OBJECTIONS by THE KIND OF CHALLENGE THEY RAISE, NOT by the claim they target. The label should be thematic and descriptive, using the form "Objects that…", for example: "Objects that it ignores individual circumstances", "Objects that it is impossible to measure", "Objects that it shifts the burden onto the vulnerable", "Objects that it conflicts with professional duties". Describe what the objection challenges without judging whether it succeeds. NEVER use evaluative terms such as "fallacious", "circular", "weak", "valid", "unethical", "right", or "wrong". Aim for 4–8 groups.
+
+The same criterion may attract different kinds of objection, and the same kind of objection may be raised against different criteria. This is normal and intentional — the claim × objection matrix that results is the point of the exercise.
+
+Then assign EACH record, identified by its number, to exactly one claim_cluster and exactly one arg_cluster.
+
+Write all labels in the same language as the records. Do not infer the output language from this prompt.
+Return ONLY valid JSON, with no text before or after it, using exactly this format:
+{
+  "claim_clusters": [{"id": "c1", "label": "..."}],
+  "arg_clusters": [{"id": "a1", "label": "..."}],
+  "assignments": [{"n": 1, "claim": "c1", "arg": "a1"}]
+}"""
+
+
+def _build_argstep_msg(question: str, records: list) -> str:
+    lines = [f"QUESTION: {question}", "", "RECORDS:"]
+    for r in records:
+        lines.append(
+            f'{r["n"]}. CLAIM: {r.get("claim", "")} | JUSTIFICATION: {r.get("justification", "")}'
+            f' | OBJECTION: {r.get("objection", "")}'
+        )
+    return "\n".join(lines)
+
+
+def cluster_argstep_claims(api_key: str, question: str, claims: list):
+    """claims: [{n, text}] — un solo asse (tappa 1 della catena). Return (result, usage)."""
+    return _call(api_key, SYSTEM_ARGSTEP_CLAIMS, _build_opentext_msg(question, claims))
+
+
+def cluster_argstep_full(api_key: str, question: str, records: list):
+    """records: [{n, claim, justification, objection}] — assi claim × obiezione. Return (result, usage)."""
+    return _call(api_key, SYSTEM_ARGSTEP_FULL, _build_argstep_msg(question, records))

@@ -161,6 +161,12 @@ def _groups(config, rows):
     }
 
 
+def _argstep(config, rows):
+    """Fallback: la vista vera di argstep e in main._argstep_results, che ha bisogno del DB
+    (etichette dei cluster + raggruppamento per risposta ereditata). Qui solo il conteggio."""
+    return {"type": "argstep", "n": len(rows), "rows": []}
+
+
 def _argpoll(config, rows):
     items = []
     for r in rows:
@@ -253,6 +259,7 @@ _DISPATCH = {
     "points": _points,
     "opentext": _opentext,
     "argpoll": _argpoll,
+    "argstep": _argstep,
     "groups": _groups,
     "connect": _connect,
     "donut": _donut,
@@ -262,4 +269,4 @@ _DISPATCH = {
 SINGLE_VOTE_TYPES = {"mc", "scale", "quadrant", "ranking", "points", "connect"}
 
 # Tipi testuali che passano per la coda di moderazione presenter-side.
-MODERATED_TYPES = {"opentext", "argpoll", "qa"}
+MODERATED_TYPES = {"opentext", "argpoll", "qa", "argstep"}
