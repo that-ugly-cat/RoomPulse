@@ -74,22 +74,22 @@ def audience_page():
 
 
 @app.get("/present")
-def presenter_page(session: str | None = Cookie(default=None)):
-    if not auth.get_user_or_none(session):
+def presenter_page(request: Request, session: str | None = Cookie(default=None)):
+    if not auth.get_user_or_none(session, request):
         return RedirectResponse("/login")
     return FileResponse(STATIC_DIR / "presenter.html")
 
 
 @app.get("/edit")
-def editor_page(session: str | None = Cookie(default=None)):
-    if not auth.get_user_or_none(session):
+def editor_page(request: Request, session: str | None = Cookie(default=None)):
+    if not auth.get_user_or_none(session, request):
         return RedirectResponse("/login")
     return FileResponse(STATIC_DIR / "editor.html")
 
 
 @app.get("/admin")
-def admin_page(session: str | None = Cookie(default=None)):
-    u = auth.get_user_or_none(session)
+def admin_page(request: Request, session: str | None = Cookie(default=None)):
+    u = auth.get_user_or_none(session, request)
     if not u:
         return RedirectResponse("/login")
     if u.get("role") != "admin":
@@ -98,7 +98,16 @@ def admin_page(session: str | None = Cookie(default=None)):
 
 
 @app.get("/login")
-def login_page():
+def login_page(request: Request, session: str | None = Cookie(default=None)):
+    # In `gateway` l'app spegne il proprio login da sola invece di affidarsi al
+    # proxy per nasconderlo: conosce la propria modalita' meglio del reverse
+    # proxy, e due anagrafiche in parallelo vorrebbero dire SSO non imposto.
+    #
+    # La destinazione e' /edit e non "/": "/" e' la pagina del PUBBLICO, e chi
+    # arriva su /login e' un presenter. Mandarlo alla schermata d'ingresso del
+    # pubblico sarebbe atterrare nel posto sbagliato dopo aver fatto il login.
+    if auth.gateway_mode():
+        return RedirectResponse("/edit")
     return FileResponse(STATIC_DIR / "login.html")
 
 
@@ -152,6 +161,10 @@ class RegisterIn(BaseModel):
 
 @app.post("/api/register")
 def register(body: RegisterIn, response: Response):
+    # In `gateway` gli account nascono nel gate, non qui: lasciare aperta questa
+    # rotta vorrebbe dire due anagrafiche in parallelo e l'SSO non imposto.
+    if auth.gateway_mode():
+        raise HTTPException(403, "Registrazione gestita dal gate SSO")
     if SIGNUP_CODE and (body.signup_code or "") != SIGNUP_CODE:
         raise HTTPException(403, "codice di registrazione non valido")
     email = _clean_email(body.email)
@@ -176,6 +189,8 @@ def register(body: RegisterIn, response: Response):
 
 @app.post("/api/login")
 def login(body: LoginIn, response: Response):
+    if auth.gateway_mode():
+        raise HTTPException(403, "Accesso gestito dal gate SSO")
     with db.get_conn() as conn:
         u = conn.execute(
             "SELECT * FROM user WHERE email=? AND is_active=1", (body.email,)
@@ -189,9 +204,16 @@ def login(body: LoginIn, response: Response):
     return {"ok": True, "name": u["name"]}
 
 
+BORANT_LOGOUT_URL = os.environ.get("BORANT_LOGOUT_URL", "https://id.borant.eu/logout")
+
+
 @app.post("/api/logout")
 def logout(response: Response):
     response.delete_cookie("session")
+    # In `gateway` buttare il cookie locale non e' uscire: la sessione sta nel
+    # gate e il click successivo rientra da solo. Il client manda il browser li'.
+    if auth.gateway_mode():
+        return {"ok": True, "redirect": BORANT_LOGOUT_URL}
     return {"ok": True}
 
 

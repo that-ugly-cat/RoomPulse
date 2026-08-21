@@ -11,7 +11,7 @@ RUN uv sync --frozen
 
 # application code
 COPY app ./app
-COPY seed.py create_user.py ./
+COPY seed.py create_user.py map_borant.py ./
 
 ENV RP_DB=/data/roompulse.db \
     UV_FROZEN=1

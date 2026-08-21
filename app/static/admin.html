@@ -245,7 +245,7 @@ async function patch(id, body) {
 }
 
 $("#lang").onchange = () => { localStorage.setItem("rp_lang", $("#lang").value); location.reload(); };
-$("#logout").onclick = async (e) => { e.preventDefault(); await fetch("/api/logout",{method:"POST"}); location.href="/login"; };
+$("#logout").onclick = async (e) => { e.preventDefault(); const r = await fetch("/api/logout",{method:"POST"}); const d = await r.json().catch(()=>({})); location.href = d.redirect || "/login"; };
 
 initI18n().then(load);
 </script>

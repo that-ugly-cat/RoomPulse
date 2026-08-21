@@ -7,18 +7,124 @@ Mirroring di `tools/automap-v2/deploy/auth.py`, adattato a sqlite raw (niente SQ
 - `get_user_or_none`: per le rotte HTML che fanno redirect a /login invece di 401.
 """
 
+import ipaddress
+import logging
 import os
+import secrets
 from datetime import datetime, timedelta
 
 import bcrypt
-from fastapi import Cookie, HTTPException, status
+from fastapi import Cookie, HTTPException, Request, status
 from jose import JWTError, jwt
 
 from app import db
 
+log = logging.getLogger("roompulse.auth")
+
 SECRET_KEY = os.environ.get("JWT_SECRET", "dev-insecure-change-me")
 ALGORITHM = "HS256"
 EXPIRE_DAYS = 7
+
+# Due modi di riconoscere un presenter, e `local` e' il default di proposito:
+# un'app che crede a un header d'identita' senza un gate davanti fa entrare
+# chiunque spedisca quell'header. Il percorso `gateway` resta codice morto
+# finche' qualcuno non lo accende apposta.
+#
+#   local     email + password sulla tabella user, come ha sempre funzionato
+#   gateway   un gate SSO a monte garantisce per chi chiama, via X-Borant-*
+#
+# Il pubblico non c'entra: /api/live/* e la pagina d'ingresso restano anonime in
+# entrambe le modalita', perche' chi partecipa non ha e non deve avere un account.
+AUTH_MODE = os.environ.get("AUTH_MODE", "local").strip().lower()
+
+# In `gateway` gli header d'identita' si credono solo se arrivano da qui — il
+# reverse proxy, mai da internet. Sotto Docker e' il gateway di una rete bridge
+# e NON 127.0.0.1: vedi DEPLOY.md per leggerlo da un container che gira.
+TRUSTED_PROXY = os.environ.get("BORANT_TRUSTED_PROXY", "127.0.0.1")
+
+# Il ruolo con cui nasce un profilo creato dal gate. `free` e non altro, e non e'
+# una preferenza: `full` e `admin` clusterizzano con la chiave centrale del
+# server, quindi un provisioning automatico verso quei ruoli aprirebbe un
+# rubinetto sul conto di chi ospita. Salire di ruolo resta una decisione umana.
+GATEWAY_DEFAULT_ROLE = "free"
+
+
+def _parse_trusted(raw: str) -> list:
+    nets = []
+    for chunk in raw.replace(";", ",").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(chunk, strict=False))
+        except ValueError:
+            log.warning("BORANT_TRUSTED_PROXY: ignoro %r, non e' un indirizzo o un CIDR", chunk)
+    return nets
+
+
+TRUSTED_PROXIES = _parse_trusted(TRUSTED_PROXY)
+
+
+def gateway_mode() -> bool:
+    return AUTH_MODE == "gateway"
+
+
+def _from_trusted_proxy(request: Request) -> bool:
+    peer = request.client.host if request.client else None
+    if not peer:
+        return False
+    try:
+        addr = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(addr in net for net in TRUSTED_PROXIES)
+
+
+def user_from_gateway(request: Request) -> dict | None:
+    """Il presenter per cui il gate garantisce, o None.
+
+    La ricerca e' per `borant_sub` e mai per email: legare per indirizzo a
+    runtime farebbe fondere due account al primo errore di battitura nel
+    pannello del gate. Chi arriva con un subject sconosciuto ottiene un profilo
+    NUOVO, non quello di qualcun altro; a legare i profili esistenti ci pensa
+    map_borant.py, che si legge prima di lanciarlo.
+    """
+    if not gateway_mode():
+        return None
+    sub = request.headers.get("x-borant-sub")
+    if not sub:
+        return None
+    if not _from_trusted_proxy(request):
+        log.warning("X-Borant-Sub da %s, fuori da BORANT_TRUSTED_PROXY (%s): ignorato",
+                    request.client.host if request.client else "?", TRUSTED_PROXY)
+        return None
+
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, email, name, role FROM user WHERE borant_sub=? AND is_active=1",
+            (sub,),
+        ).fetchone()
+        if row:
+            return dict(row)
+
+        email = (request.headers.get("x-borant-email", "") or f"{sub}@borant.invalid").strip().lower()
+        name = request.headers.get("x-borant-name", "") or email.split("@")[0]
+        # L'hint del gate puo' proporre un ruolo, ma non puo' concedere quelli
+        # che spendono: il massimo che ottiene per conto suo e' `free`.
+        hint = (request.headers.get("x-borant-hint", "") or "").strip().lower()
+        role = hint if hint == "free" else GATEWAY_DEFAULT_ROLE
+        # Una password locale che non conosce nessuno, invece di nessuna: serve
+        # a tenere `AUTH_MODE=local` una via di ritorno funzionante. Chi e' stato
+        # creato cosi' e poi torna indietro fa un reset, non trova una riga rotta.
+        uid = db.new_id()
+        conn.execute(
+            "INSERT INTO user (id, email, password_hash, name, is_active, role, created_at, borant_sub) "
+            "VALUES (?,?,?,?,1,?,?,?)",
+            (uid, email, hash_password(secrets.token_urlsafe(32)), name, role,
+             db.now_iso(), sub),
+        )
+        log.info("gateway: profilo nuovo per %s (%s), ruolo %s", email, sub, role)
+        return {"id": uid, "email": email, "name": name, "role": role}
 
 
 # ── Password (bcrypt diretto; limite hard di 72 byte) ────────────────────────
@@ -68,7 +174,14 @@ def _lookup(uid: str, ver: int = 0):
 
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
-def get_current_user(session: str | None = Cookie(default=None)) -> dict:
+def get_current_user(request: Request, session: str | None = Cookie(default=None)) -> dict:
+    if gateway_mode():
+        # L'header vince sul cookie, sempre: un cookie rimasto da prima non deve
+        # sopravvivere a una sessione che il gate ha revocato.
+        user = user_from_gateway(request)
+        if user:
+            return user
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Non autenticato")
     if not session:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Non autenticato")
     user = _lookup(*_decode_token(session))
@@ -77,7 +190,9 @@ def get_current_user(session: str | None = Cookie(default=None)) -> dict:
     return user
 
 
-def get_user_or_none(session: str | None) -> dict | None:
+def get_user_or_none(session: str | None, request: Request | None = None) -> dict | None:
+    if gateway_mode():
+        return user_from_gateway(request) if request is not None else None
     if not session:
         return None
     try:

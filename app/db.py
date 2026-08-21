@@ -166,6 +166,11 @@ _MIGRATIONS = [
     "ALTER TABLE user ADD COLUMN role TEXT NOT NULL DEFAULT 'free'",
     "ALTER TABLE response ADD COLUMN source_response_id TEXT",  # argstep: la risposta da cui eredita
     "ALTER TABLE user ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0",  # invalida le sessioni al cambio password
+    # il subject immutabile con cui un gate SSO a monte conosce questa persona.
+    # NULL per chi ha sempre fatto login qui: non e' l'email di proposito, perche'
+    # l'email cambia con l'istituzione e questo no
+    "ALTER TABLE user ADD COLUMN borant_sub TEXT",
+    "CREATE UNIQUE INDEX ix_user_borant_sub ON user (borant_sub)",
 ]
 
 
