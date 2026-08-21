@@ -111,3 +111,21 @@ proxy, backups).
 Copyright (C) 2026 Giovanni Spitale. Licensed under AGPL-3.0 — fork it, host it, sell access
 to it, but keep it closed-source and you're in violation. No SaaS forks that don't share
 back. See [LICENSE](LICENSE).
+
+## Optional: behind an SSO gate
+
+`AUTH_MODE=gateway` hands presenter identity to an upstream `forward_auth` gate
+instead of the local password: presenters arrive already signed in, `/login`
+switches itself off, and accounts are matched by an immutable subject rather
+than by email address.
+
+**The audience never meets any of it.** The join page, the QR codes and the
+whole `/api/live/*` surface stay open — a room full of phones is exactly the
+population that must not be asked to sign in, which is why the public/private
+split runs where it does.
+
+One thing worth knowing if you enable it: a presenter arriving for the first
+time is provisioned on the **free** tier, which uses their own LLM key. Roles
+that spend the server's key are granted by hand, never by arriving.
+
+`local` is the default and stays fully supported. Details in `DEPLOY.md`.
