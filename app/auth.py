@@ -11,6 +11,7 @@ import ipaddress
 import logging
 import os
 import secrets
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 
 import bcrypt
@@ -223,6 +224,53 @@ def get_current_user(request: Request, session: str | None = Cookie(default=None
     user = _lookup(*_decode_token(session))
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sessione non piu valida")
+    return user
+
+
+# ── Superficie MCP: chi sta chiamando ────────────────────────────────────────
+# Il middleware risolve la chiave e deposita qui il chiamante. `stateless_http`
+# significa una richiesta per chiamata, quindi il contextvar vale per quella e basta.
+_mcp_caller: ContextVar[dict | None] = ContextVar("mcp_caller", default=None)
+
+
+def new_mcp_key() -> str:
+    return "rp_" + secrets.token_urlsafe(32)
+
+
+def check_mcp_key(key: str) -> dict | None:
+    """L'utente proprietario di questa chiave, o None.
+
+    Timbra `last_used_at`: una chiave che qualcuno sta ancora usando da qualche
+    parte deve essere visibile come tale prima di revocarla."""
+    if not key:
+        return None
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT k.id AS kid, u.id, u.email, u.name, u.role FROM mcp_key k "
+            "JOIN user u ON u.id = k.user_id "
+            "WHERE k.key=? AND k.active=1 AND u.is_active=1",
+            (key,),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute("UPDATE mcp_key SET last_used_at=? WHERE id=?", (db.now_iso(), row["kid"]))
+    d = dict(row)
+    d.pop("kid", None)
+    return d
+
+
+def set_mcp_caller(user: dict | None) -> None:
+    _mcp_caller.set(user)
+
+
+def mcp_caller() -> dict:
+    """Il proprietario della chiave con cui e' arrivata questa chiamata.
+
+    Alza invece di restituire None: un tool che gira senza chiamante non deve
+    poter vedere nulla, e il middleware ha gia' rifiutato prima di arrivare qui."""
+    user = _mcp_caller.get()
+    if user is None:
+        raise PermissionError("nessun chiamante autenticato")
     return user
 
 

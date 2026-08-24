@@ -96,6 +96,15 @@
     <input id="set-apikey" type="password">
     <p class="muted" id="set-status" style="font-size:.8rem;margin:6px 0 0"></p>
     <hr style="border:0;border-top:1px solid var(--bar);margin:18px 0 14px">
+    <label id="set-mcplabel" style="font-weight:600"></label>
+    <p class="muted" id="set-mcphint" style="font-size:.78rem;margin:3px 0 9px"></p>
+    <div id="set-mcplist" style="font-size:.82rem"></div>
+    <div style="display:flex;gap:8px;margin-top:9px">
+      <input id="set-mcpname" style="flex:1;margin:0">
+      <button class="sm" id="set-mcpnew"></button>
+    </div>
+    <p class="muted" id="set-mcpurl" style="font-size:.74rem;margin:9px 0 0;word-break:break-all"></p>
+    <hr style="border:0;border-top:1px solid var(--bar);margin:18px 0 14px">
     <label id="set-pwlabel" style="font-weight:600"></label>
     <input id="set-pwcur" type="password" autocomplete="current-password">
     <input id="set-pwnew" type="password" autocomplete="new-password" style="margin-top:8px">
@@ -398,6 +407,7 @@ async function openSettings() {
     const me = await (await fetch("/api/me")).json();
     $("#set-status").textContent = me.api_key_set ? `${T.api_key_set} (${me.api_key_hint})` : "—";
   } catch { $("#set-status").textContent = "—"; }
+  await renderMcpKeys();
   $("#setoverlay").classList.add("show");
   $("#set-cancel").onclick = () => $("#setoverlay").classList.remove("show");
   $("#set-pwsave").onclick = async () => {
@@ -419,6 +429,45 @@ async function openSettings() {
     await fetch("/api/me/api-key", {method:"PUT", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({api_key:k})});
     $("#setoverlay").classList.remove("show");
+  };
+}
+
+// Chiavi della superficie MCP. Il valore in chiaro esiste per una risposta sola:
+// dopo, di una chiave restano nome, prefisso e ultimo uso — che e' cio' che serve
+// per decidere se revocarla, non per riusarla.
+async function renderMcpKeys(fresh) {
+  $("#set-mcplabel").textContent = T.mcp_section;
+  $("#set-mcphint").textContent = T.mcp_hint;
+  $("#set-mcpname").placeholder = T.mcp_name_ph;
+  $("#set-mcpnew").textContent = T.mcp_new;
+  $("#set-mcpurl").textContent = location.origin + "/mcp";
+  const box = $("#set-mcplist");
+  let keys = [];
+  try { keys = await (await fetch("/api/me/mcp-keys")).json(); } catch {}
+  box.innerHTML = (keys.length ? keys.map(k => `
+      <div style="display:flex;align-items:baseline;gap:8px;padding:4px 0;${k.active?"":"opacity:.45"}">
+        <b style="flex:1">${k.name}</b>
+        <code style="color:var(--muted)">${k.hint}</code>
+        <span class="muted" style="font-size:.74rem">${k.last_used_at
+          ? T.mcp_used + " " + k.last_used_at.slice(0,10) : T.mcp_never}</span>
+        ${k.active ? `<button class="sm" data-revoke="${k.id}">${T.mcp_revoke}</button>`
+                   : `<span class="muted" style="font-size:.74rem">${T.mcp_revoked}</span>`}
+      </div>`).join("") : `<p class="muted" style="margin:0">${T.mcp_none}</p>`)
+    + (fresh ? `<p style="margin:9px 0 0;padding:9px 11px;background:#13343a;border-radius:8px">
+         <code style="word-break:break-all">${fresh}</code>
+         <span class="muted" style="display:block;font-size:.74rem;margin-top:5px">${T.mcp_copy}</span></p>` : "");
+  box.querySelectorAll("[data-revoke]").forEach(b => b.onclick = async () => {
+    await fetch(`/api/me/mcp-keys/${b.dataset.revoke}`, {method:"DELETE"});
+    renderMcpKeys();
+  });
+  $("#set-mcpnew").onclick = async () => {
+    const res = await fetch("/api/me/mcp-keys", {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({name: $("#set-mcpname").value.trim() || "mcp"})});
+    if (!res.ok) return;
+    const d = await res.json();
+    $("#set-mcpname").value = "";
+    renderMcpKeys(d.key);
   };
 }
 

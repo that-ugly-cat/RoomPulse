@@ -7,6 +7,7 @@ Schema con separazione template/esecuzione:
 - run_slide    : stato per-run-per-slide (pending|open|closed|revealed), creato lazy
 - response     : risposta agganciata a (run_id, slide_id)
 - presence     : heartbeat per token dentro un run (chi e' in sala ORA)
+- mcp_key      : credenziale della superficie MCP, per-utente (non e' user.api_key)
 - carry_assign : argstep in modo peer, chi eredita il claim di chi (stabile per token)
 """
 
@@ -104,6 +105,16 @@ CREATE TABLE IF NOT EXISTS user (
     api_key       TEXT,                   -- chiave API Claude per-utente (tier free)
     role          TEXT NOT NULL DEFAULT 'free',  -- free | full | admin
     created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS mcp_key (
+    id           TEXT PRIMARY KEY,        -- credenziale della SUPERFICIE MCP, di una persona:
+    user_id      TEXT NOT NULL,           -- ogni chiamata gira come il suo proprietario e vede
+    name         TEXT NOT NULL,           -- esattamente le sue deck, niente di piu'
+    key          TEXT UNIQUE NOT NULL,    -- da non confondere con user.api_key, che e' la chiave
+    active       INTEGER NOT NULL DEFAULT 1,  -- Anthropic per il clustering: altro scopo, altra tabella
+    created_at   TEXT NOT NULL,
+    last_used_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS usage_log (

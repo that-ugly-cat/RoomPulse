@@ -14,6 +14,7 @@ argument clustering.
 | `RP_ADMIN_EMAILS` | no | unset | addresses that get the `admin` role on registration |
 | `RP_SIGNUP_CODE` | no | unset | if set, self-registration demands this code |
 | `AUTH_MODE` | no | `local` | `local` = own login. `gateway` = trust an SSO gate in front (see §6) |
+| `PUBLIC_URL` | for MCP | unset | the public origin, e.g. `https://roompulse.example`. The MCP transport checks the `Host` header against DNS rebinding, so without this every proxied MCP request is refused |
 | `BORANT_TRUSTED_PROXY` | in `gateway` | `127.0.0.1` | the address the proxy connects from; headers from elsewhere are ignored |
 | `BORANT_LOGOUT_URL` | no | `https://id.borant.eu/logout` | where "sign out" goes in `gateway` mode |
 
@@ -207,3 +208,37 @@ app switches that route off in this mode and sends it back to `/edit`, so the
 two would bounce forever. Production never shows it because the gate intercepts
 first, but a wrong proxy matcher would produce a spin instead of an error. The
 answer is a 503 naming what the operator should check.
+
+## 7. The MCP surface
+
+`/mcp` lets a model read decks, runs and the live room, and compose a deck. It is mounted on
+the same app and needs nothing extra installed — but two things have to be right, and both
+are easy to get wrong in a way that only shows up from outside.
+
+**`PUBLIC_URL` must be set.** The MCP transport validates the `Host` header against DNS
+rebinding. Localhost is allowed with any port for development; the public domain is not
+guessed, and if it is missing every request through the proxy comes back `Invalid Host
+header` while the same call works on the box.
+
+**`/mcp` must skip the SSO gate.** Its own credential *is* the per-user API key, and a model
+has no browser with which to satisfy a `forward_auth` challenge. In Caddy that means
+matching the path before the gated block:
+
+```
+roompulse.example {
+    @mcp path /mcp /mcp/*
+    handle @mcp {
+        reverse_proxy localhost:8080
+    }
+    # ...the gated handlers for everything else
+}
+```
+
+Skipping the gate is not skipping authentication: without a valid key `/mcp` answers 401
+before the request reaches the MCP layer at all, and a key resolves to exactly one user, so
+a call reaches exactly the decks that user owns.
+
+**Keys** are issued per user from the editor's ⚙ panel, shown once, and revocable. They live
+in `mcp_key` and have nothing to do with `user.api_key`, which is the Anthropic key for
+clustering — different purpose, different table, and confusing the two would hand a model
+the ability to spend money.

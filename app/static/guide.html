@@ -70,6 +70,7 @@
     <a href="#users">Users &amp; passwords</a>
     <a href="#moderation">Moderation</a>
     <a href="#data">Export &amp; import</a>
+    <a href="#mcp">Talking to it from a chat</a>
     <a href="#tips">Tips &amp; troubleshooting</a>
   </nav>
 
@@ -314,6 +315,25 @@
         with the raw responses (one row each, resolved labels, claim/justification and cluster tags in
         their own columns) — the full history in one file, ready for a paper or a spreadsheet.</li>
     </ul>
+
+    <h2 id="mcp">Talking to it from a chat</h2>
+    <p>RoomPulse has an <b>MCP surface</b>: an AI assistant that supports MCP can talk to your
+      RoomPulse directly, with a key you issue and can revoke.</p>
+    <ol>
+      <li>Open <span class="kbd">⚙</span> in the editor, give the key a name (the client that will
+        use it), and press <span class="kbd">New key</span>. <b>Copy it there and then</b> — the value
+        is shown once and never again.</li>
+      <li>Point your client at <code>https://&lt;your-roompulse&gt;/mcp</code> with the header
+        <code>X-API-Key: &lt;key&gt;</code>. Clients that cannot set headers can use the URL
+        <code>https://&lt;your-roompulse&gt;/mcp/k/&lt;key&gt;</code> instead.</li>
+    </ol>
+    <p>What it can do: list your decks, read a deck in full, list runs, read the results of any run,
+      look at the pulse of the live room (who is connected, who has answered, the chart so far), and
+      <b>compose a new deck</b> or edit slides that have no responses yet.</p>
+    <p class="muted"><b>What it deliberately cannot do: run the room.</b> No starting a run, no
+      activating a slide, no opening, closing or revealing a vote. Those are scenic decisions and they
+      belong to you, at the presenter's screen, watching the room. A key reaches exactly the decks its
+      owner owns — never anyone else's.</p>
 
     <h2 id="tips">Tips &amp; troubleshooting</h2>
     <ul>

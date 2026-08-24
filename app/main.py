@@ -13,6 +13,8 @@ import json
 import os
 import re
 import secrets
+from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 import segno
 from openpyxl import Workbook
@@ -24,6 +26,8 @@ from pathlib import Path
 
 from app import db, auth, locales, cluster as clustering
 from app.aggregate import aggregate, SINGLE_VOTE_TYPES, MODERATED_TYPES
+from app.mcp_app import mcp
+from mcp.server.transport_security import TransportSecuritySettings
 
 # dependency riusabile per le rotte presenter (alza 401 se non autenticato)
 CurrentUser = Depends(auth.get_current_user)
@@ -50,19 +54,71 @@ RP_ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get("RP_ADMIN_EMAILS", 
 MOON_DISTANCE_KM = 384400   # distanza media Terra-Luna, per l'altitudine
 MOONSHOT_MIN_PLAYERS = 3
 
-app = FastAPI(title="RoomPulse")
-
-
-@app.on_event("startup")
-def _startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     db.init_db()
     if RP_ADMIN_EMAILS:  # promuove ad admin gli account elencati in env (bootstrap del primo admin)
         with db.get_conn() as conn:
             for em in RP_ADMIN_EMAILS:
                 conn.execute("UPDATE user SET role='admin' WHERE email=?", (em,))
+    async with mcp.session_manager.run():   # superficie MCP montata su /mcp
+        yield
 
+
+app = FastAPI(title="RoomPulse", lifespan=lifespan)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+# ── Superficie MCP ───────────────────────────────────────────────────────────
+# Il trasporto controlla l'header Host contro il DNS rebinding, quindi il dominio
+# pubblico va dichiarato o ogni richiesta che passa da Caddy viene rifiutata.
+def _allowed_hosts() -> list[str]:
+    # `:*` e' un carattere jolly sulla porta, non sull'host: in sviluppo la porta
+    # cambia a ogni avvio, mentre il dominio pubblico resta uno solo ed esatto.
+    hosts = ["localhost", "127.0.0.1", "localhost:*", "127.0.0.1:*"]
+    public = urlparse(os.environ.get("PUBLIC_URL", "")).netloc
+    if public:
+        hosts.append(public)
+    return hosts
+
+
+app.mount("/mcp", mcp.streamable_http_app(
+    streamable_http_path="/", json_response=True, stateless_http=True,
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=_allowed_hosts(),
+        allowed_origins=[os.environ.get("PUBLIC_URL", ""), "http://localhost:*",
+                         "http://127.0.0.1:*"])))
+
+
+@app.middleware("http")
+async def mcp_key_gate(request: Request, call_next):
+    """Risolve il chiamante MCP, o rifiuta.
+
+    Due strade, una tabella: l'header e' la via normale, `/mcp/k/{key}` porta la
+    stessa chiave come segmento di path per i client che non sanno mandare header,
+    e viene tolto prima che l'app montata lo veda — cosi' il layer MCP non sa
+    nemmeno come si e' autenticato chi lo chiama.
+
+    Nota: questa e' l'UNICA porta di `/mcp`. Il gate SSO davanti all'app non
+    interviene qui (un client MCP non ha un browser con cui fare login), quindi
+    il blocco Caddy deve lasciar passare `/mcp` senza forward_auth."""
+    path = request.url.path
+    if not path.startswith("/mcp"):
+        return await call_next(request)
+
+    if path.startswith("/mcp/k/"):
+        key, _, rest = path[len("/mcp/k/"):].partition("/")
+        request.scope["path"] = "/mcp/" + rest
+        request.scope["raw_path"] = request.scope["path"].encode()
+    else:
+        key = request.headers.get("X-API-Key", "")
+
+    caller = auth.check_mcp_key(key)
+    auth.set_mcp_caller(caller)
+    if not caller:
+        return JSONResponse({"error": "chiave API mancante o non valida"}, status_code=401)
+    return await call_next(request)
 
 
 # ----------------------------------------------------------------------------
@@ -262,6 +318,51 @@ def set_api_key(body: ApiKeyIn, user: dict = CurrentUser):
     with db.get_conn() as conn:
         conn.execute("UPDATE user SET api_key=? WHERE id=?", (key or None, user["id"]))
     return {"ok": True, "api_key_set": bool(key)}
+
+
+# ── Chiavi della superficie MCP ──────────────────────────────────────────────
+# Sono chiavi *di una persona*: ogni chiamata MCP gira come il proprietario e
+# raggiunge esattamente le sue deck. Da non confondere con `user.api_key`, che e'
+# la chiave Anthropic per il clustering — altro scopo, altra tabella.
+class McpKeyIn(BaseModel):
+    name: str = "mcp"
+
+
+@app.get("/api/me/mcp-keys")
+def list_mcp_keys(user: dict = CurrentUser):
+    """Le chiavi del chiamante. Il valore NON si rilegge: mostrato una volta sola
+    alla creazione, qui restano nome, prefisso e ultimo uso."""
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, name, key, active, created_at, last_used_at FROM mcp_key "
+            "WHERE user_id=? ORDER BY created_at DESC", (user["id"],),
+        ).fetchall()
+    return [{"id": r["id"], "name": r["name"], "hint": r["key"][:6] + "…" + r["key"][-4:],
+             "active": bool(r["active"]), "created_at": r["created_at"],
+             "last_used_at": r["last_used_at"]} for r in rows]
+
+
+@app.post("/api/me/mcp-keys")
+def create_mcp_key(body: McpKeyIn, user: dict = CurrentUser):
+    """Crea una chiave e la restituisce in chiaro **una volta sola**."""
+    key = auth.new_mcp_key()
+    with db.get_conn() as conn:
+        conn.execute(
+            "INSERT INTO mcp_key (id, user_id, name, key, active, created_at) VALUES (?,?,?,?,1,?)",
+            (db.new_id(), user["id"], body.name.strip() or "mcp", key, db.now_iso()),
+        )
+    return {"key": key, "name": body.name.strip() or "mcp"}
+
+
+@app.delete("/api/me/mcp-keys/{kid}")
+def revoke_mcp_key(kid: str, user: dict = CurrentUser):
+    """Revoca: la riga resta (per `last_used_at`), la chiave smette di aprire."""
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT user_id FROM mcp_key WHERE id=?", (kid,)).fetchone()
+        if not row or row["user_id"] != user["id"]:
+            raise HTTPException(404, "chiave non trovata")
+        conn.execute("UPDATE mcp_key SET active=0 WHERE id=?", (kid,))
+    return {"ok": True}
 
 
 class PasswordChangeIn(BaseModel):

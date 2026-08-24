@@ -47,6 +47,7 @@ the deck and sees results update live. Try it live [here](https://roompulse.bora
   drops that account's other open sessions, and the last admin can't be locked out.
 - **Live moderation** for free-text answers, **per-owner isolation** (each user only sees
   their own decks), **deck export/import** (JSON) and **data export** (Excel — one sheet per run).
+- **MCP surface** — a model can read your decks, your runs and the pulse of the room, and compose a deck for you, from inside the conversation where the questions were invented. It cannot open, close or reveal a vote: that stays at the presenter's screen. Per-user API key, issued from the editor's ⚙.
 - **Trilingual UI** — Italian, English, German.
 
 ## How it works
@@ -58,6 +59,7 @@ Three surfaces, one fixed join code per deck:
 | **Editor** | presenter | build decks, add/reorder/inspect slides, set the API key |
 | **Presenter** | presenter | the projection: active question, live results, controls, headcount, QR + code |
 | **Audience** | public | enter the code / scan the QR, answer, see results when revealed |
+| **MCP** | a model, with your key | read decks, runs and results; write a deck. Never drives the live vote |
 
 The audience follows the presenter via light polling (no websockets). A deck (template) can
 be run many times; each *run* keeps its own responses. That same poll doubles as a presence
@@ -106,6 +108,9 @@ proxy, backups).
 ## Tech notes
 
 - Audience endpoints are public (by join code); everything else requires a presenter login.
+- `/mcp` is gated by its own per-user key (`X-API-Key`, or the `/mcp/k/{key}` capability URL
+  for clients that cannot set headers) — never by the session cookie, since a model has no
+  browser to log in with.
 - Set `JWT_SECRET` in production (there is an insecure default for local dev).
 - The whole database is a single SQLite file — back up by copying it.
 
