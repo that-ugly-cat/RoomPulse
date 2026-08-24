@@ -185,3 +185,25 @@ Rollback, two lines and no data migration:
 sed -i 's/^AUTH_MODE=gateway/AUTH_MODE=local/' .env
 docker compose up -d
 ```
+
+## The landing, the home, and the role hint
+
+**RoomPulse is the exception to the perimeter's shape.** Everywhere else `/` is
+a public showcase and the app lives at `/app`. Here `/` is already public and
+already the product: it is the audience page, where a room joins with a code
+and no account at all. The host's side lives at `/edit` and `/present`, behind
+the gate.
+
+**The role hint is honoured**, with a vocabulary of `free, full, admin`. Until
+24/8/2026 the gate declared three and the code accepted exactly one, which is a
+menu offering roles the code ignores — worse than no menu. `full` and `admin`
+cluster with the server's central Anthropic key, so they spend: creating a
+profile in either role from a hint is logged loudly, naming the address and the
+subject. An unrecognised hint is a typo, not a role, and falls back to `free`.
+
+**A page that needs an identity fails closed.** In `gateway` an unauthenticated
+request to `/edit`, `/present` or `/admin` does *not* redirect to `/login` — the
+app switches that route off in this mode and sends it back to `/edit`, so the
+two would bounce forever. Production never shows it because the gate intercepts
+first, but a wrong proxy matcher would produce a spin instead of an error. The
+answer is a 503 naming what the operator should check.

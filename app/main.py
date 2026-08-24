@@ -508,6 +508,47 @@ def _run_slide_state(conn, run_id: str, slide_id: str) -> str:
     return row["state"] if row else "pending"
 
 
+# --- headcount: chi c'e' in sala, e chi ha davvero votato ---------------------
+# La presenza e' un heartbeat scritto dal poll del pubblico (/api/live), non dal voto:
+# conta le persone COLLEGATE, comprese quelle che stanno zitte.
+PRESENCE_TTL_MS = 20_000    # oltre questa soglia il token e' considerato uscito
+PRESENCE_WRITE_MS = 5_000   # il poll gira ogni 1.5s: non riscrivo a ogni giro
+
+
+def _touch_presence(conn, run_id: str, token: str) -> None:
+    now = db.now_ms()
+    conn.execute(
+        "INSERT INTO presence (run_id, token, last_seen_ms) VALUES (?,?,?) "
+        "ON CONFLICT(run_id, token) DO UPDATE SET last_seen_ms=excluded.last_seen_ms "
+        "WHERE excluded.last_seen_ms - presence.last_seen_ms > ?",
+        (run_id, token, now, PRESENCE_WRITE_MS),
+    )
+
+
+def _present_count(conn, run_id: str) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) AS c FROM presence WHERE run_id=? AND last_seen_ms >= ?",
+        (run_id, db.now_ms() - PRESENCE_TTL_MS),
+    ).fetchone()["c"]
+
+
+def _voter_count(conn, run_id: str, slide_id: str) -> int:
+    """PERSONE distinte che hanno risposto, non righe di risposta.
+
+    La differenza conta in due casi opposti, ed e' il motivo per cui questo numero
+    non e' `results.n`:
+    - risposta multipla (mc con `multi`): una persona, una riga, ma N opzioni segnate,
+      quindi le barre sommano piu' dei votanti;
+    - tipi a invii ripetuti (opentext, wordcloud, qa, argpoll senza `single`): una
+      persona, N righe, quindi le risposte sono piu' dei votanti.
+    Le risposte nascoste dalla moderazione restano contate: la persona ha votato."""
+    return conn.execute(
+        "SELECT COUNT(DISTINCT participant_token) AS c FROM response "
+        "WHERE run_id=? AND slide_id=?",
+        (run_id, slide_id),
+    ).fetchone()["c"]
+
+
 def _merged_mc_options(conn, run_id: str, slide) -> list:
     """Opzioni base (config) + quelle aggiunte dai partecipanti in questo run."""
     config = json.loads(slide["config"])
@@ -1143,6 +1184,12 @@ def start_run(pid: str, body: RunIn, user: dict = CurrentUser):
         conn.execute(
             "UPDATE presentation SET active_run_id=? WHERE id=?", (rid, pid)
         )
+        # la presenza dei run precedenti non serve piu' a nessuno: e' un heartbeat, non storia
+        conn.execute(
+            "DELETE FROM presence WHERE run_id IN "
+            "(SELECT id FROM run WHERE presentation_id=? AND id<>?)",
+            (pid, rid),
+        )
         return {"run_id": rid}
 
 
@@ -1166,6 +1213,7 @@ def purge_runs(pid: str, user: dict = CurrentUser):
             conn.execute("DELETE FROM mc_option WHERE run_id=?", (rid,))
             conn.execute("DELETE FROM cluster WHERE run_id=?", (rid,))
             conn.execute("DELETE FROM carry_assign WHERE run_id=?", (rid,))
+            conn.execute("DELETE FROM presence WHERE run_id=?", (rid,))
         conn.execute("UPDATE presentation SET active_run_id=NULL WHERE id=?", (pid,))
         conn.execute("DELETE FROM run WHERE presentation_id=?", (pid,))
         return {"ok": True, "purged_runs": len(run_ids)}
@@ -1286,6 +1334,8 @@ def presenter_view(pid: str, user: dict = CurrentUser):
                 "results": results,
                 "moderation": moderation,
                 "pair": pair,
+                "present": _present_count(conn, rid),
+                "voters": _voter_count(conn, rid, active) if active else 0,
             }
             if active and aslide and aslide["type"] == "moonshot":
                 _ensure_moonshot_lobby(conn, rid, active)
@@ -1364,6 +1414,7 @@ def _purge_presentation(conn, pid: str) -> tuple[int, int]:
         conn.execute("DELETE FROM mc_option WHERE run_id=?", (rid,))
         conn.execute("DELETE FROM cluster WHERE run_id=?", (rid,))
         conn.execute("DELETE FROM carry_assign WHERE run_id=?", (rid,))
+        conn.execute("DELETE FROM presence WHERE run_id=?", (rid,))
     conn.execute("DELETE FROM run WHERE presentation_id=?", (pid,))
     for sid in slide_ids:
         conn.execute("DELETE FROM slide WHERE id=?", (sid,))
@@ -1630,6 +1681,8 @@ def live(code: str, t: str | None = None):
         slide = conn.execute("SELECT * FROM slide WHERE id=?", (active,)).fetchone()
         if slide is None:  # puntatore penzolante
             return {"status": "waiting", "title": pres["title"]}
+        if t:
+            _touch_presence(conn, rid, t)
         state = _run_slide_state(conn, rid, active)
         payload = {
             "status": "live",

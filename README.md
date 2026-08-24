@@ -56,11 +56,14 @@ Three surfaces, one fixed join code per deck:
 | Surface | Who | What |
 |---|---|---|
 | **Editor** | presenter | build decks, add/reorder/inspect slides, set the API key |
-| **Presenter** | presenter | the projection: active question, live results, controls, QR + code |
+| **Presenter** | presenter | the projection: active question, live results, controls, headcount, QR + code |
 | **Audience** | public | enter the code / scan the QR, answer, see results when revealed |
 
 The audience follows the presenter via light polling (no websockets). A deck (template) can
-be run many times; each *run* keeps its own responses.
+be run many times; each *run* keeps its own responses. That same poll doubles as a presence
+heartbeat, so the presenter sees how many people are **in the room** next to how many have
+actually **voted** — distinct people, not rows, which is not the same number as soon as a
+question takes multiple answers or repeated submissions.
 
 ## Quick start
 

@@ -6,6 +6,7 @@ Schema con separazione template/esecuzione:
 - run          : una sessione live della deck (active_slide + ciclo di vita)
 - run_slide    : stato per-run-per-slide (pending|open|closed|revealed), creato lazy
 - response     : risposta agganciata a (run_id, slide_id)
+- presence     : heartbeat per token dentro un run (chi e' in sala ORA)
 - carry_assign : argstep in modo peer, chi eredita il claim di chi (stabile per token)
 """
 
@@ -69,6 +70,15 @@ CREATE TABLE IF NOT EXISTS response (
 );
 
 CREATE INDEX IF NOT EXISTS idx_response_run_slide ON response(run_id, slide_id);
+
+CREATE TABLE IF NOT EXISTS presence (
+    run_id       TEXT NOT NULL,           -- chi e' in sala ORA: un heartbeat per token,
+    token        TEXT NOT NULL,           -- scritto dal poll del pubblico, non dal voto
+    last_seen_ms INTEGER NOT NULL,
+    PRIMARY KEY (run_id, token)
+);
+
+CREATE INDEX IF NOT EXISTS idx_presence_seen ON presence(run_id, last_seen_ms);
 
 CREATE TABLE IF NOT EXISTS qa_vote (
     run_id      TEXT NOT NULL,

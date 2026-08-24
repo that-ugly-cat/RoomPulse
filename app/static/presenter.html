@@ -38,6 +38,14 @@
   .controls button.orange.danger { background:var(--danger); color:#fff; }
   .controls button:disabled { opacity:.4; cursor:default; }
   .controls .spacer { flex:1; }
+  .counts { display:flex; align-items:center; gap:8px; margin-left:4px; flex-wrap:wrap; }
+  .counts .chip { display:flex; align-items:baseline; gap:6px; padding:8px 14px; border-radius:10px;
+        background:#181b22; border:1px solid var(--bar); color:var(--muted); font-size:.82rem;
+        white-space:nowrap; cursor:default; }
+  .counts .chip b { color:var(--fg); font-size:1.15rem; font-weight:800; }
+  .counts .chip .pct { color:var(--accent); font-weight:700; }
+  .counts .chip.multi { border-color:#4a3f1a; background:#2a2410; color:#b59a4a; }
+  .counts .chip.multi b { color:var(--orange); }
   .pnotes { background:#2a2410; border:1px solid #4a3f1a; border-left:3px solid var(--orange);
         border-radius:8px; padding:11px 15px; margin:0 0 20px; color:#e8d9a8; line-height:1.55;
         white-space:pre-wrap; max-height:38vh; overflow-y:auto; }
@@ -211,7 +219,7 @@ function render() {
   const slide = state.slides.find(s => s.id === activeId);
   if (slide.type === "moonshot") { renderMoonshotPresenter(slide, run); return; }
   killMs();
-  renderMain(slide, states[activeId]||"open", run.results, run.moderation, run.pair);
+  renderMain(slide, states[activeId]||"open", run.results, run.moderation, run.pair, run);
 }
 
 let msGame = null, msSlideId = null;
@@ -248,9 +256,11 @@ function renderMoonshotPresenter(slide, run) {
   if ($("#msreset")) $("#msreset").onclick = () => msAction("reset", slide.id);
   $("#newrun").onclick = newRun;
   const m = $("#msmeta");
-  if (m && g) m.textContent = st === "lobby" ? `${g.ready_count} ${T.ms_ready_crew} · min ${g.min_players}`
+  // moonshot non produce risposte: il numero utile accanto all'equipaggio e' chi c'e' in sala
+  const inRoom = ` · ${(run && run.present) || 0} ${T.in_room}`;
+  if (m && g) m.textContent = (st === "lobby" ? `${g.ready_count} ${T.ms_ready_crew} · min ${g.min_players}`
     : (g.result ? (g.result==="success"?T.ms_reached:T.ms_incomplete) + " · " + Math.round(g.progress_frac*100)+"%"
-       : `${T.ms_crew} ${g.total_crew} · ${Math.round(g.progress_frac*100)}% · ${g.boosts_left} boost`);
+       : `${T.ms_crew} ${g.total_crew} · ${Math.round(g.progress_frac*100)}% · ${g.boosts_left} boost`)) + inRoom;
 }
 
 async function msAction(kind, slide_id) {
@@ -259,7 +269,30 @@ async function msAction(kind, slide_id) {
   if (res.ok) load(); else { const e = await res.json().catch(()=>({})); alert(e.detail||"Errore"); }
 }
 
-function renderMain(slide, st, results, moderation, pair) {
+// Persone collegate e persone che hanno votato: due numeri diversi, e nessuno dei due
+// e' `results.n`. Con la risposta multipla una persona segna N opzioni (le barre sommano
+// piu' dei votanti); con i tipi a invii ripetuti una persona lascia N risposte (le
+// risposte sommano piu' dei votanti). Il denominatore onesto e' sempre `voters`.
+function headcount(results, run) {
+  const present = (run && run.present) || 0;
+  const voters  = (run && run.voters)  || 0;
+  const pct = present ? Math.round(voters / present * 100) : null;
+  // il totale delle risposte e' gia' nella riga meta: qui aggiungo solo cio' che non si
+  // legge altrove, cioe' quante CASELLE sono state segnate quando la risposta e' multipla
+  let extra = "";
+  if (results && results.type === "mc" && results.multi) {
+    const picks = (results.options || []).reduce((a, o) => a + (o.count || 0), 0);
+    extra = `<span class="chip multi" title="${T.selections_hint}"><b>${picks}</b> ${T.selections_word}</span>`;
+  }
+  return `<span class="counts">
+    <span class="chip" title="${T.in_room_hint}">\u{1F465} <b>${present}</b> ${T.in_room}</span>
+    <span class="chip" title="${T.voters_hint}">\u{1F5F3}️ <b>${voters}</b> ${T.voters_word}${
+      pct !== null ? ` <span class="pct">${pct}%</span>` : ""}</span>
+    ${extra}
+  </span>`;
+}
+
+function renderMain(slide, st, results, moderation, pair, run) {
   const hasMod = moderation != null;
   const isQa = slide.type === "qa";
   const isDonut = slide.type === "donut";
@@ -278,6 +311,7 @@ function renderMain(slide, st, results, moderation, pair) {
        <button id="open">${T.reopen_vote}</button>
        ${(slide.type==="argpoll"||slide.type==="opentext")
           ? `<button id="clusterbtn"${clustering?" disabled":""}>${clustering?T.clustering_wait:T.cluster_now}</button>` : ""}`;
+  const countsHtml = headcount(results, run);
   const runCtrls = `<span class="spacer"></span>
        <button class="orange" id="newrun">${T.new_run}</button>
        <button class="orange" id="purge">${T.purge_runs}</button>`;
@@ -287,7 +321,7 @@ function renderMain(slide, st, results, moderation, pair) {
     <p class="q">${slide.question}</p>
     <p class="meta">${(results&&results.n)||0} ${T.responses_word} · ${T.state_word}: <b>${st}</b></p>
     ${notes}
-    <div class="controls">${navCtrls}${typeCtrls}${runCtrls}</div>
+    <div class="controls">${navCtrls}${typeCtrls}${countsHtml}${runCtrls}</div>
     <div class="reshead">
       <button id="peek" class="${peek?'on':''}">${(peek ? "\u{1F441} "+T.peek_on : "\u{1F6AB} "+T.peek_off)}</button>
       <span class="hint">${T.peek_hint}</span>
