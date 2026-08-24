@@ -47,6 +47,11 @@ TRUSTED_PROXY = os.environ.get("BORANT_TRUSTED_PROXY", "127.0.0.1")
 # server, quindi un provisioning automatico verso quei ruoli aprirebbe un
 # rubinetto sul conto di chi ospita. Salire di ruolo resta una decisione umana.
 GATEWAY_DEFAULT_ROLE = "free"
+# Il vocabolario che il gate dichiara in /admin/apps deve combaciare con questo,
+# o il pannello offre ruoli che qui non arrivano da nessuna parte.
+RUOLI_NOTI = {"free", "full", "admin"}
+# `full` e `admin` clusterizzano con la chiave Anthropic del server: spendono.
+RUOLI_CHE_SPENDONO = {"full", "admin"}
 
 
 def _parse_trusted(raw: str) -> list:
@@ -109,10 +114,41 @@ def user_from_gateway(request: Request) -> dict | None:
 
         email = (request.headers.get("x-borant-email", "") or f"{sub}@borant.invalid").strip().lower()
         name = request.headers.get("x-borant-name", "") or email.split("@")[0]
-        # L'hint del gate puo' proporre un ruolo, ma non puo' concedere quelli
-        # che spendono: il massimo che ottiene per conto suo e' `free`.
+        # L'hint del gate propone il ruolo di partenza, e da oggi vengono
+        # onorati tutti e tre — non solo `free`.
+        #
+        # La regola del §18 dice di non provisionare mai da un header un ruolo
+        # che spende, e `full` e `admin` spendono: usano la chiave Anthropic
+        # centrale del server, senza tetto per utente da nessuna parte. La
+        # deroga e' deliberata e vale per la stessa ragione di Grant Radar: la
+        # regola nasce da un'app con la **registrazione aperta**, dove l'hint
+        # porta cio' che ha chiesto *chi bussa*. Su Borant ID la registrazione
+        # aperta e' spenta, e anche una richiesta d'accesso fa scegliere il
+        # ruolo all'amministratore al momento di approvare — quindi in questo
+        # header `full` o `admin` ci sono solo perche' un umano li ha digitati.
+        #
+        # Prima il vocabolario del gate ne dichiarava tre e il codice ne
+        # accettava uno: un menu che offre ruoli che il codice non guarda e'
+        # peggio di nessun menu, ed e' lo stesso difetto corretto su Grant
+        # Radar il 24/8/2026.
+        #
+        # Quello che il codice deve comunque e' **rumore**: un ruolo che spende,
+        # concesso per questa via, lo dice a voce alta. Un hint non riconosciuto
+        # e' un refuso, non un ruolo, e ricade sul default che non spende.
         hint = (request.headers.get("x-borant-hint", "") or "").strip().lower()
-        role = hint if hint == "free" else GATEWAY_DEFAULT_ROLE
+        if hint in RUOLI_NOTI:
+            role = hint
+            if role in RUOLI_CHE_SPENDONO:
+                log.warning(
+                    "gateway: %s (%s) creato come %r su suggerimento del gate. "
+                    "Quel ruolo usa la chiave Anthropic centrale, senza tetto "
+                    "per utente. Revocare da /admin se non era voluto.",
+                    email, sub, role)
+        else:
+            if hint:
+                log.warning("gateway: hint %r non in %s, ricado su %r",
+                            hint, sorted(RUOLI_NOTI), GATEWAY_DEFAULT_ROLE)
+            role = GATEWAY_DEFAULT_ROLE
         # Una password locale che non conosce nessuno, invece di nessuna: serve
         # a tenere `AUTH_MODE=local` una via di ritorno funzionante. Chi e' stato
         # creato cosi' e poi torna indietro fa un reset, non trova una riga rotta.
