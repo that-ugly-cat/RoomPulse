@@ -73,17 +73,39 @@ def audience_page():
     return FileResponse(STATIC_DIR / "audience.html")
 
 
+def _al_login():
+    """Dove mandare chi non e' autenticato su una pagina che lo richiede.
+
+    In `gateway` **non** si rimanda a `/login`: quella rotta, in questa
+    modalita', l'app la spegne da se' e rimanda a `/edit` — i due si
+    rimbalzerebbero all'infinito. In produzione non capita, perche' il gate
+    intercetta prima che la richiesta arrivi qui; ma se il matcher del proxy
+    fosse sbagliato si girerebbe a vuoto invece di ricevere un errore, e un
+    anello e' molto piu' difficile da diagnosticare di un codice di stato.
+
+    Il messaggio e' quello di Onopedia: parla all'**operatore**, perche' in
+    `gateway` una richiesta senza identita' significa che il gate non ha
+    girato — un guasto di configurazione, non della persona.
+    """
+    if auth.gateway_mode():
+        raise HTTPException(status_code=503, detail=(
+            "Gateway mode: no valid identity in the X-Borant-* headers. Check "
+            "that the gate really sits in front of this app and that "
+            "BORANT_TRUSTED_PROXY lists the address the proxy connects from."))
+    return RedirectResponse("/login")
+
+
 @app.get("/present")
 def presenter_page(request: Request, session: str | None = Cookie(default=None)):
     if not auth.get_user_or_none(session, request):
-        return RedirectResponse("/login")
+        return _al_login()
     return FileResponse(STATIC_DIR / "presenter.html")
 
 
 @app.get("/edit")
 def editor_page(request: Request, session: str | None = Cookie(default=None)):
     if not auth.get_user_or_none(session, request):
-        return RedirectResponse("/login")
+        return _al_login()
     return FileResponse(STATIC_DIR / "editor.html")
 
 
@@ -91,7 +113,7 @@ def editor_page(request: Request, session: str | None = Cookie(default=None)):
 def admin_page(request: Request, session: str | None = Cookie(default=None)):
     u = auth.get_user_or_none(session, request)
     if not u:
-        return RedirectResponse("/login")
+        return _al_login()
     if u.get("role") != "admin":
         return RedirectResponse("/edit")
     return FileResponse(STATIC_DIR / "admin.html")
