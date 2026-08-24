@@ -9,17 +9,28 @@
   :root { --bg:#0f1115; --card:#1a1d24; --fg:#e8eaed; --muted:#9aa0ab;
           --accent:#16a3ab; --bar:#2a2e38; --ok:#3fb950; --danger:#d9554f; --orange:#e8862e; }
   * { box-sizing:border-box; }
+  html, body { height:100%; }
   body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif;
-         background:var(--bg); color:var(--fg); }
-  .grid { display:grid; grid-template-columns:280px 1fr; min-height:100vh; }
-  .side { background:#14171d; padding:18px; border-right:1px solid var(--bar); }
-  .main { padding:32px 40px; }
+         background:var(--bg); color:var(--fg); overflow:hidden; }
+  /* due scroller indipendenti: la lista delle slide scorre per conto suo, la pagina
+     per il suo. Cosi il join code e il QR non spariscono mai dietro una deck lunga,
+     e scorrere i risultati non muove l'elenco. */
+  .grid { display:grid; grid-template-columns:280px 1fr; height:100vh; min-height:0; }
+  .side { background:#14171d; padding:18px; border-right:1px solid var(--bar);
+          display:flex; flex-direction:column; min-height:0; overflow:hidden; }
+  .main { padding:32px 40px; overflow-y:auto; min-height:0; }
+  .slidelist, .main { scrollbar-width:thin; scrollbar-color:#2f3542 transparent; }
+  .slidelist::-webkit-scrollbar, .main::-webkit-scrollbar { width:10px; }
+  .slidelist::-webkit-scrollbar-track, .main::-webkit-scrollbar-track { background:transparent; }
+  .slidelist::-webkit-scrollbar-thumb, .main::-webkit-scrollbar-thumb {
+        background:#2f3542; border-radius:6px; border:3px solid transparent; background-clip:content-box; }
+  .slidelist::-webkit-scrollbar-thumb:hover, .main::-webkit-scrollbar-thumb:hover { background-color:#3d4454; }
   h1 { font-size:.8rem; color:var(--muted); letter-spacing:.1em; margin:0 0 14px; }
   a.editlink { color:var(--accent); font-size:.8rem; }
   .join { text-align:center; background:var(--card); border-radius:12px; padding:14px; margin:10px 0 16px; }
   .join .num { font-size:2rem; font-weight:800; letter-spacing:.18em; }
   .join img { width:130px; height:130px; background:#fff; border-radius:8px; padding:6px; margin-top:8px; }
-  .slidelist { list-style:none; padding:0; margin:0; }
+  .slidelist { list-style:none; padding:0 6px 0 0; margin:0; flex:1; overflow-y:auto; min-height:0; }
   .slidelist li { padding:11px 12px; border-radius:9px; margin:6px 0; background:#1c2027;
         cursor:pointer; font-size:.9rem; border:1px solid transparent; }
   .slidelist li:hover { border-color:var(--bar); }
@@ -170,6 +181,9 @@ function escapeHtml(x) {
 // anteprima risultati sullo schermo del presenter: preferenza locale, persistita.
 // Distinta da reveal (`show_results`), che è ciò che vede il PUBBLICO.
 let peek = localStorage.getItem("rp_peek") !== "0";
+// stesso meccanismo per le note del presentatore: preferenza locale, di default visibili.
+// Serve quando lo schermo del presenter e' duplicato o condiviso invece che privato.
+let notesOn = localStorage.getItem("rp_notes") !== "0";
 // il poll ridisegna ogni 1.5s: senza questo flag il bottone tornerebbe "Clusterizza"
 // mentre la chiamata LLM e ancora in volo
 let clustering = false;
@@ -315,8 +329,9 @@ function renderMain(slide, st, results, moderation, pair, run) {
   const runCtrls = `<span class="spacer"></span>
        <button class="orange" id="newrun">${T.new_run}</button>
        <button class="orange" id="purge">${T.purge_runs}</button>`;
-  const notes = slide.presenter_notes
-    ? `<div class="pnotes"><span class="tagn">${T.presenter_notes_label}</span>${slide.presenter_notes}</div>` : "";
+  const hasNotes = !!(slide.presenter_notes && slide.presenter_notes.trim());
+  const notes = (hasNotes && notesOn)
+    ? `<div class="pnotes"><span class="tagn">${T.notes_label}</span>${slide.presenter_notes}</div>` : "";
   $("#main").innerHTML = `
     <p class="q">${slide.question}</p>
     <p class="meta">${(results&&results.n)||0} ${T.responses_word} · ${T.state_word}: <b>${st}</b></p>
@@ -324,6 +339,8 @@ function renderMain(slide, st, results, moderation, pair, run) {
     <div class="controls">${navCtrls}${typeCtrls}${countsHtml}${runCtrls}</div>
     <div class="reshead">
       <button id="peek" class="${peek?'on':''}">${(peek ? "\u{1F441} "+T.peek_on : "\u{1F6AB} "+T.peek_off)}</button>
+      ${hasNotes ? `<button id="notestoggle" class="${notesOn?'on':''}">${
+        notesOn ? "\u{1F5D2}️ "+T.notes_on : "\u{1F6AB} "+T.notes_off}</button>` : ""}
       <span class="hint">${T.peek_hint}</span>
     </div>
     <div class="layout ${hasMod?'mod':''}">
@@ -360,6 +377,9 @@ function renderMain(slide, st, results, moderation, pair, run) {
   }
   $("#peek").onclick = () => {
     peek = !peek; localStorage.setItem("rp_peek", peek ? "1" : "0"); render();
+  };
+  if ($("#notestoggle")) $("#notestoggle").onclick = () => {
+    notesOn = !notesOn; localStorage.setItem("rp_notes", notesOn ? "1" : "0"); render();
   };
   $("#res").innerHTML = peek
     ? (pair ? renderComparison(results, pair, slide) : renderResults(results))
