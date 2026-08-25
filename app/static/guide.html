@@ -65,6 +65,7 @@
     <a href="#groups">Random groups</a>
     <a href="#connect">Connections</a>
     <a href="#donut">Donut energizer</a>
+    <a href="#timer">Break timer</a>
     <a href="#clustering">AI clustering</a>
     <a href="#admin">Admin &amp; tiers</a>
     <a href="#users">Users &amp; passwords</a>
@@ -142,6 +143,8 @@
       <tr><td><b>Random groups</b></td><td>Get assigned to a balanced group.</td><td>Count per group.</td></tr>
       <tr><td><b>Connections (mapping)</b></td><td>Link items across two columns.</td><td>Left×right heat matrix (+ bipartite graph for you).</td></tr>
       <tr><td><b>Donut</b> <span class="tag">game</span></td><td>Play a one-button runner.</td><td>Live leaderboard + histogram.</td></tr>
+      <tr><td><b>Timer</b> <span class="tag">break</span></td><td>Watch the countdown to the
+        restart.</td><td>Nothing collected — the slide is the countdown.</td></tr>
     </table>
 
     <h2 id="surfaces">The three surfaces</h2>
@@ -251,6 +254,22 @@
       talk is about attention or human factors — the real distribution of scores becomes a talking
       point. Open / closed works like Q&amp;A: while open people play and see the top few; when you
       close it the full leaderboard shows.</p>
+
+    <h2 id="timer">Break timer</h2>
+    <p>A slide that asks nothing: a <b>countdown</b>, shown big on the projector and on every
+      phone in the room. That is the point of doing it here rather than with a video on your
+      slides — the people who stepped out for coffee are still holding the room in their hand,
+      so they can see when you resume.</p>
+    <p>When you build the slide you set the <b>minutes</b>, whether it <b>starts by itself</b>
+      as soon as you put the slide up (it does, by default), and whether to show the
+      <b>wall-clock time</b> you resume at — that last one is what people photograph.</p>
+    <p>While it runs you get <b>Restart</b>, <b>+1 min</b>, <b>+5 min</b> and <b>Clear</b>. Two
+      things worth knowing: going back to the break slide does <b>not</b> restart the count (it
+      would be worse than no timer for someone watching it from the corridor), and asking for
+      <b>+2 min</b> after time is up gives you two minutes from now, not two minutes from when
+      it expired. The countdown stops at zero and never goes negative.</p>
+    <p>Each phone counts locally from the moment the server says the break ends, so the number
+      stays smooth and <b>keeps running even if the network drops</b>.</p>
 
     <h2 id="clustering">AI argument clustering</h2>
     <p>For <b>Claim + justification</b>, <b>Open text</b> and the <b>Argument chain</b>, an LLM can

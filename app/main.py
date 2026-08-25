@@ -1333,7 +1333,7 @@ def activate_slide(rid: str, body: ActivateIn, user: dict = CurrentUser):
         if not run:
             raise HTTPException(404, "run not found")
         slide = conn.execute(
-            "SELECT 1 FROM slide WHERE id=? AND presentation_id=?",
+            "SELECT * FROM slide WHERE id=? AND presentation_id=?",
             (body.slide_id, run["presentation_id"]),
         ).fetchone()
         if not slide:
@@ -1344,6 +1344,8 @@ def activate_slide(rid: str, body: ActivateIn, user: dict = CurrentUser):
             "ON CONFLICT(run_id, slide_id) DO UPDATE SET state='open'",
             (rid, body.slide_id),
         )
+        if slide["type"] == "timer" and _timer_config(slide)["autostart"]:
+            _timer_start(conn, rid, slide, only_if_absent=True)
         return {"active_slide_id": body.slide_id, "state": "open"}
 
 
@@ -1441,6 +1443,8 @@ def presenter_view(pid: str, user: dict = CurrentUser):
             if active and aslide and aslide["type"] == "moonshot":
                 _ensure_moonshot_lobby(conn, rid, active)
                 out["run"]["moonshot"] = _moonshot_state(conn, rid, aslide)
+            if active and aslide and aslide["type"] == "timer":
+                out["run"]["timer"] = _timer_state(conn, rid, aslide)
         return out
 
 
@@ -1801,6 +1805,8 @@ def live(code: str, t: str | None = None):
         if slide["type"] == "moonshot":
             _ensure_moonshot_lobby(conn, rid, active)
             payload["moonshot"] = _moonshot_state(conn, rid, slide, t)
+        if slide["type"] == "timer":
+            payload["timer"] = _timer_state(conn, rid, slide)
         if slide["type"] == "argstep":
             cfg = payload["slide"]["config"]
             cfg["fields"] = _argstep_fields(cfg)
@@ -2290,6 +2296,117 @@ def _record_usage(conn, user_id: str, run_id: str, slide_id: str, kind: str, usa
         "input_tokens, output_tokens, cost_usd, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (db.new_id(), user_id, run_id, slide_id, kind, clustering.MODEL, it, ot, cost, db.now_iso()),
     )
+
+
+# --- timer: una slide che dura, invece di una che chiede ---------------------
+# L'unico tipo il cui contenuto e' il tempo. Vive con lo stesso patto di moonshot:
+# il server tiene l'istante, il client conta da solo. La differenza e' che qui si
+# salva la FINE e non l'inizio - cosi' aggiungere due minuti (che in aula capita
+# sempre) e' un UPDATE di una colonna, e non un ricalcolo di durata.
+
+TIMER_DEFAULT_MIN = 15.0
+TIMER_MAX_MIN = 600.0
+
+
+def _timer_config(slide) -> dict:
+    raw = slide["config"]
+    cfg = json.loads(raw) if isinstance(raw, str) else (raw or {})
+    try:
+        minutes = float(cfg.get("minutes", TIMER_DEFAULT_MIN))
+    except (TypeError, ValueError):
+        minutes = TIMER_DEFAULT_MIN
+    minutes = max(0.1, min(TIMER_MAX_MIN, minutes))
+    return {
+        "minutes": minutes,
+        "autostart": cfg.get("autostart", True) is not False,
+        "show_end_time": cfg.get("show_end_time", True) is not False,
+    }
+
+
+def _timer_start(conn, run_id: str, slide, only_if_absent: bool = False) -> None:
+    """(Ri)avvia il countdown adesso. Con `only_if_absent` non tocca uno gia' in corso."""
+    cfg = _timer_config(slide)
+    now = db.now_ms()
+    ends = now + int(cfg["minutes"] * 60_000)
+    if only_if_absent:
+        # tornare sulla slide di pausa non fa ripartire il tempo: chi e' fuori dalla
+        # stanza sta guardando quel numero, e vederlo risalire e' peggio che non averlo
+        conn.execute(
+            "INSERT INTO timer_state (run_id, slide_id, started_at_ms, ends_at_ms) "
+            "VALUES (?,?,?,?) ON CONFLICT(run_id, slide_id) DO NOTHING",
+            (run_id, slide["id"], now, ends),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO timer_state (run_id, slide_id, started_at_ms, ends_at_ms) "
+            "VALUES (?,?,?,?) ON CONFLICT(run_id, slide_id) DO UPDATE SET "
+            "started_at_ms=excluded.started_at_ms, ends_at_ms=excluded.ends_at_ms",
+            (run_id, slide["id"], now, ends),
+        )
+
+
+def _timer_state(conn, run_id: str, slide) -> dict:
+    """Stato del countdown. `server_now_ms` viaggia sempre: e' cio' che permette al
+    client di correggere lo scarto fra il proprio orologio e quello del server."""
+    cfg = _timer_config(slide)
+    row = conn.execute(
+        "SELECT started_at_ms, ends_at_ms FROM timer_state WHERE run_id=? AND slide_id=?",
+        (run_id, slide["id"]),
+    ).fetchone()
+    now = db.now_ms()
+    out = {"config": cfg, "server_now_ms": now}
+    if not row:
+        out["status"] = "idle"
+        return out
+    out.update({
+        "status": "running",
+        "started_at_ms": row["started_at_ms"],
+        "ends_at_ms": row["ends_at_ms"],
+        "remaining_ms": max(0, row["ends_at_ms"] - now),
+        "expired": now >= row["ends_at_ms"],
+    })
+    return out
+
+
+class TimerIn(BaseModel):
+    slide_id: str
+    seconds: int | None = None      # solo per `extend`
+
+
+@app.post("/api/runs/{rid}/timer/{action}")
+def timer_action(rid: str, action: str, body: TimerIn, user: dict = CurrentUser):
+    """start = (ri)avvia da adesso, extend = sposta la fine, clear = torna a non avviato."""
+    if action not in ("start", "extend", "clear"):
+        raise HTTPException(400, "azione non valida")
+    with db.get_conn() as conn:
+        _check_owner(conn, _pid_of_run(conn, rid), user)
+        slide = conn.execute("SELECT * FROM slide WHERE id=?", (body.slide_id,)).fetchone()
+        if not slide or slide["type"] != "timer":
+            raise HTTPException(404, "slide timer non trovata")
+        if action == "start":
+            _timer_start(conn, rid, slide)
+        elif action == "clear":
+            conn.execute(
+                "DELETE FROM timer_state WHERE run_id=? AND slide_id=?", (rid, body.slide_id)
+            )
+        else:
+            secs = int(body.seconds or 0)
+            if not secs:
+                raise HTTPException(400, "extend richiede `seconds`")
+            row = conn.execute(
+                "SELECT ends_at_ms FROM timer_state WHERE run_id=? AND slide_id=?",
+                (rid, body.slide_id),
+            ).fetchone()
+            if not row:
+                raise HTTPException(409, "timer non avviato")
+            # si estende dalla fine se il tempo c'e' ancora, da adesso se e' gia' scaduto:
+            # "+2 minuti" detto a tempo scaduto vuol dire due minuti da ora, non due minuti fa
+            base = max(row["ends_at_ms"], db.now_ms())
+            conn.execute(
+                "UPDATE timer_state SET ends_at_ms=? WHERE run_id=? AND slide_id=?",
+                (base + secs * 1000, rid, body.slide_id),
+            )
+        return _timer_state(conn, rid, slide)
 
 
 @app.post("/api/runs/{rid}/cluster")

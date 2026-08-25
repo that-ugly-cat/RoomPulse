@@ -26,6 +26,8 @@ the deck and sees results update live. Try it live [here](https://roompulse.bora
   and a random group splitter.
 - **Donut energizer** — a one-button endless-runner (tap / spacebar) played on the audience's
   phones: dodge the ruins, grab donuts, and everyone's best scores build a live leaderboard.
+- **Break timer** — a countdown the whole room can see, phones included. It is the audience's
+  own screen, so the people who left for coffee know when to come back too.
   A break that *also* produces data — handy when the talk is about attention or human factors.
 - **Argument chain** — build an argument one move at a time across linked slides: first a
   claim, then the justification for it, then an objection — each stage carrying the previous

@@ -229,13 +229,14 @@ function render() {
   }).join("");
   $("#slides").querySelectorAll("li").forEach(li => li.onclick = () => activate(li.dataset.id));
 
-  if (!run) { killMs(); $("#main").innerHTML = `<p class="empty">${T.no_run}</p>
+  if (!run) { killMs(); killTimer(); $("#main").innerHTML = `<p class="empty">${T.no_run}</p>
     <div class="controls"><button class="primary" id="newrun">${T.start_run}</button></div>`;
     $("#newrun").onclick = newRun; return; }
-  if (!activeId) { killMs(); $("#main").innerHTML = `<p class='empty'>${T.click_slide}</p>`; return; }
+  if (!activeId) { killMs(); killTimer(); $("#main").innerHTML = `<p class='empty'>${T.click_slide}</p>`; return; }
   const slide = state.slides.find(s => s.id === activeId);
-  if (slide.type === "moonshot") { renderMoonshotPresenter(slide, run); return; }
-  killMs();
+  if (slide.type === "moonshot") { killTimer(); renderMoonshotPresenter(slide, run); return; }
+  if (slide.type === "timer") { killMs(); renderTimerPresenter(slide, run); return; }
+  killMs(); killTimer();
   renderMain(slide, states[activeId]||"open", run.results, run.moderation, run.pair, run);
 }
 
@@ -278,6 +279,89 @@ function renderMoonshotPresenter(slide, run) {
   if (m && g) m.textContent = (st === "lobby" ? `${g.ready_count} ${T.ms_ready_crew} · min ${g.min_players}`
     : (g.result ? (g.result==="success"?T.ms_reached:T.ms_incomplete) + " · " + Math.round(g.progress_frac*100)+"%"
        : `${T.ms_crew} ${g.total_crew} · ${Math.round(g.progress_frac*100)}% · ${g.boosts_left} boost`)) + inRoom;
+}
+
+// --- timer -------------------------------------------------------------------
+// Il countdown del presenter e' lo stesso della sala: stesso istante di fine, stesso
+// conteggio locale. Cosi' il numero sul portatile e quello sul telefono non divergono.
+let tmrSlideId = null, tmrTicker = null, tmrData = null, tmrOffset = 0;
+function killTimer() {
+  if (tmrTicker) { clearInterval(tmrTicker); tmrTicker = null; }
+  tmrSlideId = null; tmrData = null;
+}
+function tmrFmt(ms) {
+  const t = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), sec = t % 60;
+  const pad = n => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+function tmrClock(ms) {
+  return new Date(ms).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+}
+function paintTimerPresenter() {
+  const g = tmrData, num = $("#tmrnum");
+  if (!g || !num) return;
+  const meta = $("#tmrmeta");
+  if (g.status !== "running") {
+    num.style.color = "";
+    num.textContent = tmrFmt((g.config.minutes || 0) * 60000);
+    num.style.opacity = ".35";
+    if (meta) meta.textContent = T.timer_idle;
+    return;
+  }
+  const left = g.ends_at_ms - (Date.now() + tmrOffset);
+  num.style.opacity = "1";
+  num.style.color = left <= 0 ? "var(--accent)" : "";
+  num.textContent = tmrFmt(left);
+  if (meta) meta.textContent = left <= 0 ? T.timer_over
+    : `${T.timer_resume_at} ${tmrClock(g.ends_at_ms)}`;
+}
+function renderTimerPresenter(slide, run) {
+  const g = run.timer;
+  tmrData = g || null;
+  if (g && g.server_now_ms) tmrOffset = g.server_now_ms - Date.now();
+  if (slide.id !== tmrSlideId) {
+    tmrSlideId = slide.id;
+    const idx = state.slides.findIndex(x => x.id === slide.id);
+    const prevId = idx > 0 ? state.slides[idx-1].id : null;
+    const nextId = (idx >= 0 && idx < state.slides.length-1) ? state.slides[idx+1].id : null;
+    const hasNotes = !!(slide.presenter_notes && slide.presenter_notes.trim());
+    $("#main").innerHTML = `<p class="q">${slide.question}</p>
+      ${(hasNotes && notesOn) ? `<div class="pnotes"><span class="tagn">${T.notes_label}</span>${slide.presenter_notes}</div>` : ""}
+      <div style="font-size:4rem;font-weight:800;line-height:1;font-variant-numeric:tabular-nums" id="tmrnum">–</div>
+      <p class="meta" id="tmrmeta" style="margin-top:8px"></p>
+      <div class="controls" id="tmrctl">
+        <button id="prev"${prevId?"":" disabled"}>${T.prev_slide}</button>
+        <button id="next"${nextId?"":" disabled"}>${T.next_slide}</button>
+        <button class="primary" id="tmrstart"></button>
+        <button id="tmrp1">+1 min</button>
+        <button id="tmrp5">+5 min</button>
+        <button class="orange" id="tmrclear">${T.timer_clear}</button>
+        <span class="spacer"></span>
+        <button class="orange" id="newrun">${T.new_run}</button>
+      </div>`;
+    if (prevId) $("#prev").onclick = () => activate(prevId);
+    if (nextId) $("#next").onclick = () => activate(nextId);
+    $("#tmrstart").onclick  = () => tmrAction("start", slide.id);
+    $("#tmrp1").onclick     = () => tmrAction("extend", slide.id, 60);
+    $("#tmrp5").onclick     = () => tmrAction("extend", slide.id, 300);
+    $("#tmrclear").onclick  = () => tmrAction("clear", slide.id);
+    $("#newrun").onclick = newRun;
+    if (!tmrTicker) tmrTicker = setInterval(paintTimerPresenter, 250);
+  }
+  const running = !!(g && g.status === "running");
+  const startBtn = $("#tmrstart");
+  if (startBtn) startBtn.textContent = running ? T.timer_restart : T.timer_start;
+  ["tmrp1","tmrp5","tmrclear"].forEach(id => { const b = $("#"+id); if (b) b.disabled = !running; });
+  paintTimerPresenter();
+}
+
+async function tmrAction(kind, slide_id, seconds) {
+  const res = await fetch(`/api/runs/${state.run.id}/timer/${kind}`, {method:"POST",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify({slide_id, seconds})});
+  if (res.ok) { tmrData = await res.json(); if (tmrData.server_now_ms) tmrOffset = tmrData.server_now_ms - Date.now();
+                paintTimerPresenter(); load(); }
+  else { const e = await res.json().catch(()=>({})); alert(e.detail||"Errore"); }
 }
 
 async function msAction(kind, slide_id) {

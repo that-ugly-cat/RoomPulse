@@ -281,6 +281,11 @@ SLIDE_TYPES = {
               "config": {}},
     "moonshot": {"what": "collaborative energiser: the room flies one rocket",
                  "config": {"min_players": "int (default 3)"}},
+    "timer": {"what": ("a countdown the whole room can see, phones included; for breaks. "
+                       "Asks nothing and collects nothing"),
+              "config": {"minutes": "number (default 15)",
+                         "autostart": "bool: starts when the slide is activated (default true)",
+                         "show_end_time": "bool: also show the wall-clock time it ends (default true)"}},
 }
 
 

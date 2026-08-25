@@ -151,6 +151,14 @@ CREATE TABLE IF NOT EXISTS carry_assign (
 
 CREATE INDEX IF NOT EXISTS idx_carry_source ON carry_assign(run_id, slide_id, source_response_id);
 
+CREATE TABLE IF NOT EXISTS timer_state (
+    run_id        TEXT NOT NULL,                   -- countdown di una slide `timer`, per-run
+    slide_id      TEXT NOT NULL,
+    started_at_ms INTEGER NOT NULL,                -- epoch ms dell'avvio (per la frazione trascorsa)
+    ends_at_ms    INTEGER NOT NULL,                -- epoch ms della fine: e' QUESTO l'orario autorevole,
+    PRIMARY KEY (run_id, slide_id)                 -- non i secondi rimasti, cosi' estendere e' un UPDATE
+);                                                 -- e il client continua a contare anche offline
+
 CREATE TABLE IF NOT EXISTS moonshot_game (
     run_id        TEXT NOT NULL,
     slide_id      TEXT NOT NULL,
