@@ -35,6 +35,9 @@
         cursor:pointer; font-size:.9rem; border:1px solid transparent; }
   .slidelist li:hover { border-color:var(--bar); }
   .slidelist li.active { border-color:var(--accent); background:#13343a; }
+  .slidelist .n { display:inline-block; min-width:1.4em; margin-right:7px; text-align:center;
+        color:var(--muted); font-size:.72rem; font-weight:700; font-variant-numeric:tabular-nums; }
+  .slidelist li.active .n { color:var(--accent); }
   .slidelist .t { color:var(--muted); font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; }
   .badge { float:right; font-size:.68rem; padding:2px 7px; border-radius:20px; background:var(--bar); color:var(--muted); }
   .badge.open { background:#13343a; color:var(--accent); }
@@ -218,10 +221,10 @@ function render() {
   const run = state.run;
   const activeId = run ? run.active_slide_id : null;
   const states = run ? run.states : {};
-  $("#slides").innerHTML = state.slides.map(s => {
+  $("#slides").innerHTML = state.slides.map((s, i) => {
     const st = states[s.id] || "pending";
     return `<li class="${s.id===activeId?'active':''}" data-id="${s.id}">
-      <span class="t">${s.type}</span><span class="badge ${st}">${st}</span>
+      <span class="n">${i+1}</span><span class="t">${s.type}</span><span class="badge ${st}">${st}</span>
       <div>${s.question}</div></li>`;
   }).join("");
   $("#slides").querySelectorAll("li").forEach(li => li.onclick = () => activate(li.dataset.id));
