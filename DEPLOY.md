@@ -242,6 +242,26 @@ if either is missing the route answers 404 as though it did not exist:
    assume it: docker picks the range, and `172.17.0.0/16` is the *default
    bridge*, which is not this network.
 
+   **Adding this network changes the address the proxy appears to come from,
+   and that is how you lock everyone out.** Docker picks among the gateways of
+   a container's networks in alphabetical order of network name, so
+   `borant_provision` sorts ahead of `roompulse_default` and Caddy's requests
+   started arriving from `192.168.240.1` instead of `192.168.0.1`. With
+   `BORANT_TRUSTED_PROXY` still naming the old one, the app threw the gate's
+   headers away and nobody could sign in — measured in production on 8 Sep
+   2026, three `X-Borant-Sub from 192.168.240.1, outside BORANT_TRUSTED_PROXY`
+   lines in the log. So, in the same breath as the network:
+
+   ```
+   BORANT_TRUSTED_PROXY=192.168.0.1,192.168.240.1
+   ```
+
+   The field has always taken a comma-separated list. Keep both: the ordering
+   can flip on the next `up -d` with nobody having touched anything. And do not
+   check this by loading a page — a gated path answers 302 both when you are
+   not signed in and when the app has discarded who you are. Check it with a
+   real session, and read the app's log.
+
 2. **Join both compose files to it**, RoomPulse's and Borant ID's:
 
    ```yaml
