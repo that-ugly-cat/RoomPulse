@@ -17,6 +17,8 @@ argument clustering.
 | `PUBLIC_URL` | for MCP | unset | the public origin, e.g. `https://roompulse.example`. The MCP transport checks the `Host` header against DNS rebinding, so without this every proxied MCP request is refused |
 | `BORANT_TRUSTED_PROXY` | in `gateway` | `127.0.0.1` | the address the proxy connects from; headers from elsewhere are ignored |
 | `BORANT_LOGOUT_URL` | no | `https://id.borant.eu/logout` | where "sign out" goes in `gateway` mode |
+| `PROVISION_SECRET` | no | unset | shared secret for `/internal/provision` (see §7). Unset = the route does not exist |
+| `PROVISION_TRUSTED` | no | unset | CIDR the gate calls from, e.g. `172.28.0.0/16`. Unset = the route does not exist |
 
 Generate a secret:
 
@@ -208,6 +210,76 @@ app switches that route off in this mode and sends it back to `/edit`, so the
 two would bounce forever. Production never shows it because the gate intercepts
 first, but a wrong proxy matcher would produce a spin instead of an error. The
 answer is a 503 naming what the operator should check.
+
+## 6-bis. Provisioning in advance (`/internal/provision`)
+
+Optional, and off unless you turn it on. Without it a presenter's profile is
+born the first time they open RoomPulse; with it, Borant ID says who is coming
+as soon as it grants access, so the profile is already here and can be prepared
+against — and a hundred people arriving in the same minute stop racing each
+other to create their own rows.
+
+**The route is not reachable from the internet, by construction.** It is not a
+public path in the Caddy config and it never goes through Caddy at all: the gate
+calls the container directly on a docker network the two share. Two locks, and
+if either is missing the route answers 404 as though it did not exist:
+
+- `PROVISION_SECRET` — the credential, compared in constant time.
+- `PROVISION_TRUSTED` — the CIDR the gate's container sits on.
+
+### Wiring it up
+
+1. **One network for both containers.** The published ports stay on
+   `127.0.0.1` (that invariant does not move); this is a second, internal
+   network where the two can address each other by name.
+
+   ```bash
+   docker network create borant_provision
+   docker network inspect borant_provision -f '{{(index .IPAM.Config 0).Subnet}}'
+   ```
+
+   The subnet that prints is what goes in `PROVISION_TRUSTED`. Read it, do not
+   assume it: docker picks the range, and `172.17.0.0/16` is the *default
+   bridge*, which is not this network.
+
+2. **Join both compose files to it**, RoomPulse's and Borant ID's:
+
+   ```yaml
+   services:
+     roompulse:
+       networks: [default, borant_provision]
+   networks:
+     borant_provision:
+       external: true
+   ```
+
+3. **Set the two variables** in RoomPulse's `.env` and restart. The secret is
+   any long random string; generate it the same way as `JWT_SECRET`.
+
+4. **On the gate**, in `/admin/apps` → RoomPulse, fill in the provisioning
+   address and the same secret. The address is the container on the shared
+   network and the port it listens on *inside* the container, which is 8080 and
+   not the 8011 published on the host:
+
+   ```
+   http://roompulse:8080/internal/provision
+   ```
+
+   Then press «Resync»: it pushes everyone who already has a grant, and the
+   numbers it reports are the proof the wiring works.
+
+### What it may and may not do
+
+**It creates profiles that are not there, and nothing else.** It never updates a
+profile, never changes a role, never deactivates. A stolen secret buys empty
+accounts, not somebody's presentations — which is the difference between a
+convenience and a remote control on this database.
+
+**It does not link by address.** If a local profile already holds an incoming
+address without a `borant_sub`, the entry is reported back as a conflict and
+nothing is touched. Linking those is `map_borant.py`, by hand, as it always was:
+one typo in the gate's panel must not merge two accounts, and that does not
+become safer for happening at office hours.
 
 ## 7. The MCP surface
 

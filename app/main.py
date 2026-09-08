@@ -10,6 +10,7 @@ Seed:     uv run python seed.py
 
 import io
 import json
+import logging
 import os
 import re
 import secrets
@@ -18,7 +19,9 @@ from urllib.parse import urlparse
 
 import segno
 from openpyxl import Workbook
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import (
+    Cookie, Depends, FastAPI, Header, HTTPException, Request, Response,
+)
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -28,6 +31,8 @@ from app import db, auth, locales, cluster as clustering
 from app.aggregate import aggregate, SINGLE_VOTE_TYPES, MODERATED_TYPES
 from app.mcp_app import mcp
 from mcp.server.transport_security import TransportSecuritySettings
+
+log = logging.getLogger("roompulse.main")
 
 # dependency riusabile per le rotte presenter (alza 401 se non autenticato)
 CurrentUser = Depends(auth.get_current_user)
@@ -205,6 +210,55 @@ SIGNUP_CODE = os.environ.get("RP_SIGNUP_CODE")  # se settato, la registrazione l
 @app.get("/api/auth-config")
 def auth_config():
     return {"signup_code_required": bool(SIGNUP_CODE)}
+
+
+class ProvisionUser(BaseModel):
+    subject: str
+    email: str = ""
+    name: str = ""
+    hint: str = ""
+
+
+class ProvisionIn(BaseModel):
+    users: list[ProvisionUser]
+
+
+@app.post("/internal/provision")
+def internal_provision(body: ProvisionIn, request: Request,
+                       authorization: str | None = Header(default=None)):
+    """Chi potra' entrare, detto in anticipo dal gate.
+
+    Serve a una cosa sola: che il profilo di una persona esista **prima** che
+    quella persona apra l'app. Senza, un centinaio di studenti non esiste qui
+    finche' non ha cliccato, quindi non lo si puo' mettere in un gruppo, e la
+    preparazione di un corso si sposta dalla sera prima al minuto dopo l'inizio.
+
+    Non e' su una rotta pubblica e non passa da Caddy: il gate la chiama sulla
+    rete docker condivisa, all'indirizzo del container. Chi chiama deve avere
+    il segreto e arrivare da `PROVISION_TRUSTED`; senza entrambi la rotta non
+    esiste, e risponde 404 invece di 401 perche' a chi bussa da fuori non si
+    deve nemmeno confermare che ci sia qualcosa dietro.
+
+    **Crea e basta.** Chi c'e' gia' viene contato e non toccato: nessun ruolo
+    cambiato, nessun profilo aggiornato, niente disattivazioni. E' cio' che
+    tiene questa rotta una comodita' invece che un telecomando sul database.
+    """
+    if not auth.provision_caller_ok(request, authorization):
+        raise HTTPException(404, "Not Found")
+
+    out = {"created": 0, "already": 0, "conflict": 0, "conflicts": []}
+    with db.get_conn() as conn:
+        for entry in body.users:
+            sub = (entry.subject or "").strip()
+            if not sub:
+                continue
+            esito, _ = auth.provision(conn, sub, entry.email, entry.name, entry.hint)
+            out[esito] = out[esito] + 1
+            if esito == "conflict":
+                out["conflicts"].append({"email": entry.email, "subject": sub})
+    log.info("provision: creati %d, gia' presenti %d, conflitti %d",
+             out["created"], out["already"], out["conflict"])
+    return out
 
 
 MIN_PASSWORD = 6
@@ -640,7 +694,7 @@ def _voter_count(conn, run_id: str, slide_id: str) -> int:
     non e' `results.n`:
     - risposta multipla (mc con `multi`): una persona, una riga, ma N opzioni segnate,
       quindi le barre sommano piu' dei votanti;
-    - tipi a invii ripetuti (opentext, wordcloud, qa, argpoll senza `single`): una
+    - tipi a invii ripetuti (opentext, wordcloud, qa, argstep senza `single`): una
       persona, N righe, quindi le risposte sono piu' dei votanti.
     Le risposte nascoste dalla moderazione restano contate: la persona ha votato."""
     return conn.execute(
@@ -701,13 +755,6 @@ def _results(conn, run_id: str, slide) -> dict:
         return _qa_results(conn, run_id, slide["id"])
     if slide["type"] == "mc":
         return _mc_results(conn, run_id, slide)
-    if slide["type"] == "argpoll":
-        has = conn.execute(
-            "SELECT 1 FROM cluster WHERE run_id=? AND slide_id=? LIMIT 1",
-            (run_id, slide["id"]),
-        ).fetchone()
-        if has:
-            return _argpoll_clustered(conn, run_id, slide["id"])
     if slide["type"] == "opentext":
         has = conn.execute(
             "SELECT 1 FROM cluster WHERE run_id=? AND slide_id=? AND kind='theme' LIMIT 1",
@@ -882,59 +929,11 @@ def _argstep_results(conn, run_id: str, slide) -> dict:
             for c in claim_cl
         ],
     }
-    if claim_cl and arg_cl:  # matrice claim x tipo di obiezione, stessa forma di argpoll
+    if claim_cl and arg_cl:  # matrice claim x tipo di obiezione
         res["matrix"] = [[matrix[(c["id"], a["id"])] for a in arg_cl] for c in claim_cl]
         res["matrix_rows"] = [c["label"] for c in claim_cl]
         res["matrix_cols"] = [a["label"] for a in arg_cl]
     return res
-
-
-def _argpoll_clustered(conn, run_id: str, slide_id: str) -> dict:
-    """Vista clusterizzata: claim cluster annidati con tag dell'argomento + matrice claim×arg."""
-    claim_cl = conn.execute(
-        "SELECT id, label FROM cluster WHERE run_id=? AND slide_id=? AND kind='claim' ORDER BY ord",
-        (run_id, slide_id),
-    ).fetchall()
-    arg_cl = conn.execute(
-        "SELECT id, label FROM cluster WHERE run_id=? AND slide_id=? AND kind='arg' ORDER BY ord",
-        (run_id, slide_id),
-    ).fetchall()
-    arg_label = {a["id"]: a["label"] for a in arg_cl}
-    rows = conn.execute(
-        "SELECT payload, claim_cluster_id, arg_cluster_id FROM response "
-        "WHERE run_id=? AND slide_id=? AND status='visible'",
-        (run_id, slide_id),
-    ).fetchall()
-    by_claim: dict = {c["id"]: [] for c in claim_cl}
-    matrix: dict = {(c["id"], a["id"]): 0 for c in claim_cl for a in arg_cl}
-    n = 0
-    for r in rows:
-        p = json.loads(r["payload"])
-        n += 1
-        cc, ac = r["claim_cluster_id"], r["arg_cluster_id"]
-        if cc in by_claim:
-            by_claim[cc].append({
-                "claim": p.get("claim", ""),
-                "justification": p.get("justification", ""),
-                "arg_label": arg_label.get(ac, ""),
-            })
-        if (cc, ac) in matrix:
-            matrix[(cc, ac)] += 1
-    claims_out = sorted(
-        [{"id": c["id"], "label": c["label"], "count": len(by_claim[c["id"]]),
-          "items": by_claim[c["id"]]} for c in claim_cl],
-        key=lambda x: -x["count"],
-    )
-    return {
-        "type": "argpoll",
-        "n": n,
-        "clustered": True,
-        "claim_clusters": claims_out,
-        "arg_clusters": [{"id": a["id"], "label": a["label"]} for a in arg_cl],
-        "matrix": [[matrix[(c["id"], a["id"])] for a in arg_cl] for c in claim_cl],
-        "matrix_rows": [c["label"] for c in claim_cl],
-        "matrix_cols": [a["label"] for a in arg_cl],
-    }
 
 
 def _opentext_clustered(conn, run_id: str, slide_id: str) -> dict:
@@ -1158,7 +1157,7 @@ def _validate_argstep(conn, pid: str, cfg: dict, self_id: str | None = None) -> 
             raise HTTPException(400, "la prima tappa non eredita nulla")
         return
     if not src:
-        raise HTTPException(400, "tappa oltre la prima: serve la slide da cui ereditare")
+        return  # tappa autosufficiente: chiede da se tutti i suoi campi, senza ereditare
     if src == self_id:
         raise HTTPException(400, "una tappa non puo ereditare da se stessa")
     row = conn.execute(
@@ -1650,7 +1649,7 @@ def _fmt_answer(stype: str, p: dict, optmap: dict) -> str:
         return p.get("group_name", "")
     if stype == "donut":
         return str(p.get("score", ""))
-    if stype in ("argpoll", "argstep"):
+    if stype == "argstep":
         return ""  # claim/justification/objection vanno nelle loro colonne
     return json.dumps(p, ensure_ascii=False)
 
@@ -1691,7 +1690,7 @@ def _run_export_rows(conn, rid: str, slides) -> list[list]:
         ).fetchall()
         for r in rows:
             p = json.loads(r["payload"])
-            argy = s["type"] in ("argpoll", "argstep")
+            argy = s["type"] == "argstep"
             claim = p.get("claim", "") if argy else ""
             just = p.get("justification", "") if argy else ""
             obj = p.get("objection", "") if argy else ""
@@ -2007,7 +2006,7 @@ def respond(code: str, body: RespondIn):
             return {"ok": True, "single": bool(cfg.get("single", True))}
 
         # voto singolo → upsert: rimuovo il voto precedente di questo token.
-        # `config.single` lo rende disponibile anche ai tipi testuali (opentext, argpoll).
+        # `config.single` lo rende disponibile anche ai tipi testuali (opentext, wordcloud).
         if slide["type"] in SINGLE_VOTE_TYPES or json.loads(slide["config"]).get("single"):
             conn.execute(
                 "DELETE FROM response WHERE run_id=? AND slide_id=? AND participant_token=?",
@@ -2411,7 +2410,7 @@ def timer_action(rid: str, action: str, body: TimerIn, user: dict = CurrentUser)
 
 @app.post("/api/runs/{rid}/cluster")
 def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
-    """Clusterizza (LLM) le risposte argpoll/opentext del run.
+    """Clusterizza (LLM) le risposte argstep/opentext del run.
     Tier free → chiave dell'utente; tier full/admin → chiave centrale del server (con cost tracking)."""
     with db.get_conn() as conn:
         _check_owner(conn, _pid_of_run(conn, rid), user)
@@ -2427,7 +2426,7 @@ def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
             if not key:
                 raise HTTPException(400, "API key non configurata")
         slide = conn.execute("SELECT * FROM slide WHERE id=?", (body.slide_id,)).fetchone()
-        if not slide or slide["type"] not in ("argpoll", "opentext", "argstep"):
+        if not slide or slide["type"] not in ("opentext", "argstep"):
             raise HTTPException(404, "slide non valida")
         rows = conn.execute(
             "SELECT payload FROM response WHERE run_id=? AND slide_id=? AND status='visible' "
@@ -2453,17 +2452,11 @@ def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
                     recs = [{"n": i, "claim": p.get("claim", ""),
                              "justification": p.get("justification", "")}
                             for i, p in enumerate(payloads, start=1)]
-                    result, usage = clustering.cluster_argpoll(key, question, recs)
+                    result, usage = clustering.cluster_argstep_pairs(key, question, recs)
                 else:
                     recs = [{"n": i, "text": p.get("claim", "")}
                             for i, p in enumerate(payloads, start=1)]
                     result, usage = clustering.cluster_argstep_claims(key, question, recs)
-            elif slide["type"] == "argpoll":
-                pairs = []
-                for i, r in enumerate(rows, start=1):
-                    p = json.loads(r["payload"])
-                    pairs.append({"n": i, "claim": p.get("claim", ""), "justification": p.get("justification", "")})
-                result, usage = clustering.cluster_argpoll(key, question, pairs)
             else:  # opentext
                 texts = []
                 for i, r in enumerate(rows, start=1):
@@ -2476,9 +2469,6 @@ def cluster_run_slide(rid: str, body: ClusterIn, user: dict = CurrentUser):
         if slide["type"] == "argstep":
             _materialize_clusters(conn, rid, body.slide_id, result)
             return _argstep_results(conn, rid, slide)
-        if slide["type"] == "argpoll":
-            _materialize_clusters(conn, rid, body.slide_id, result)
-            return _argpoll_clustered(conn, rid, body.slide_id)
         _materialize_text_clusters(conn, rid, body.slide_id, result)
         return _opentext_clustered(conn, rid, body.slide_id)
 
