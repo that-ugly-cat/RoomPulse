@@ -43,6 +43,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "unsupported_type":  "Tipo non supportato dal client.",
         "mean":              "media",
         "votes":             "voti",
+        "show_all":          "mostra tutto",
+        "show_less":         "riduci",
         # ── editor ────────────────────────────────────────────────────────────
         "logout":            "esci",
         "new_deck_ph":       "Titolo nuova deck",
@@ -334,6 +336,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "unsupported_type":  "Type not supported by the client.",
         "mean":              "mean",
         "votes":             "votes",
+        "show_all":          "show all",
+        "show_less":         "show less",
         # ── editor ────────────────────────────────────────────────────────────
         "logout":            "sign out",
         "new_deck_ph":       "New deck title",
@@ -625,6 +629,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "unsupported_type":  "Typ vom Client nicht unterstützt.",
         "mean":              "Mittelwert",
         "votes":             "Stimmen",
+        "show_all":          "mehr anzeigen",
+        "show_less":         "weniger anzeigen",
         # ── editor ────────────────────────────────────────────────────────────
         "logout":            "abmelden",
         "new_deck_ph":       "Titel des neuen Decks",

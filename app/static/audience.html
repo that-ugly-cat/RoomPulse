@@ -117,10 +117,57 @@
         color:var(--fg); font-size:1rem; cursor:pointer; text-align:left; }
   .citem.armed { border-color:var(--accent); background:#13343a; }
   .citem.linked { border-color:var(--accent); }
-  table.cmx { border-collapse:collapse; width:100%; font-size:.82rem; }
-  table.cmx th, table.cmx td { border:1px solid var(--bar); padding:6px 8px; text-align:center; }
-  table.cmx th { color:var(--muted); font-weight:600; }
-  table.cmx th:first-child, table.cmx td:first-child { text-align:left; }
+  /* Risultati di `connect`: la stessa matrice in DUE forme, tutte e due nel
+     markup, accese a vicenda dalla media query. Nessun listener di resize, e
+     ruotare il telefono basta.
+     Sopra i 600px: griglia di tessere con le intestazioni di colonna ruotate.
+     Nove criteri con etichette lunghe (in tedesco lo sono sempre) non stanno in
+     una riga di testo: dritte facevano una tabella da 900px che usciva dalla
+     card e si disegnava sopra lo sfondo.
+     Sotto i 600px: niente griglia. Un blocco per principio, coi criteri che ha
+     ricevuto — si legge nell'ordine in cui la domanda e' formulata, invece di
+     chiedere di incrociare riga e colonna col pollice. */
+  .cxscroll { overflow-x:auto; overflow-y:hidden;
+        scrollbar-width:thin; scrollbar-color:#2f3542 transparent; }
+  .cxscroll::-webkit-scrollbar { height:9px; }
+  .cxscroll::-webkit-scrollbar-thumb { background:#2f3542; border-radius:6px; }
+  table.cxm { border-collapse:separate; border-spacing:3px; font-size:.82rem; }
+  table.cxm th.colh { writing-mode:vertical-rl; transform:rotate(180deg); white-space:normal;
+        max-height:170px; padding:6px 3px; color:var(--muted); font-weight:600; font-size:.74rem;
+        vertical-align:bottom; text-align:left; line-height:1.15; }
+  /* il nome della riga resta fermo mentre si scorre: sul telefono in orizzontale,
+     e sul desktop quando i criteri sono davvero tanti */
+  table.cxm th.rowh { text-align:right; font-weight:600; font-size:.8rem; padding-right:9px;
+        white-space:nowrap; position:sticky; left:0; z-index:2; background:var(--card); }
+  table.cxm th.corner { z-index:3; }
+  table.cxm td { width:34px; min-width:34px; height:34px; text-align:center; border-radius:6px;
+        background:#212632; color:#04201f; font-weight:800; font-variant-numeric:tabular-nums; }
+  table.cxm td.zero { color:transparent; }
+  .cxrow { padding:12px 0; border-top:1px solid #23272f; }
+  .cxrow:first-child { border-top:0; }
+  .cxname { font-weight:700; font-size:1rem; margin-bottom:8px; }
+  .cxchip { display:inline-flex; align-items:center; gap:7px; background:#13343a; color:var(--accent);
+        border:1px solid #1d4b50; border-radius:20px; padding:5px 11px; margin:0 6px 6px 0;
+        font-size:.82rem; line-height:1.2; }
+  .cxchip b { color:#04201f; background:var(--accent); border-radius:20px; min-width:19px; height:19px;
+        display:inline-flex; align-items:center; justify-content:center; font-size:.72rem; }
+  .q.small { font-size:1.02rem; }
+  .q.clamp { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .qmore { color:var(--accent); font-size:.8rem; cursor:pointer; display:inline-block; margin:-10px 0 16px; }
+  @media (min-width:600px) {
+    .cxlist { display:none; }
+    /* la card esce dalla colonna del telefono, come gia' fanno .donutwrap e
+       .tmrwrap: stessa pagina, ma questa a volte e' proiettata. Larga quanto
+       il contenuto chiede (`max-content`, che ignora la colonna da 560px) e non
+       un pixel di piu': con nove criteri la griglia sta in ~480px e una card da
+       1120 sarebbe quasi tutta vuota. Il tetto serve a quindici criteri, non a
+       questi. `left+translate` centra senza dover conoscere la larghezza. */
+    .card.cwide { width:max-content; min-width:100%; max-width:min(1120px,94vw);
+        position:relative; left:50%; transform:translateX(-50%); }
+    /* senza questo la domanda su una riga sola sarebbe la misura di max-content */
+    .card.cwide .q { max-width:70ch; }
+  }
+  @media (max-width:599px) { .cxgrid { display:none; } }
   .msctl { margin-top:12px; min-height:56px; }
   .msboost { font-size:1.5rem; padding:22px; }
   .msboost.boosted { transform:scale(.97); background:#0d7d84; }
@@ -730,8 +777,22 @@ function renderResults(data) {
   } else if (r.type === "connect") {
     body = connectMatrix(r);
   } else { body = `<p class="muted">${r.n||0} risposte.</p>`; }
-  root.innerHTML = `<div class="card"><p class="q">${data.slide.question}</p>${body}</div>
+  // La matrice di `connect` chiede larghezza e altezza che la colonna non ha:
+  // la card si allarga (sopra i 600px) e la domanda si accorcia a due righe. A
+  // risultati rivelati la stanza la domanda l'ha gia' sentita, ma resta a un
+  // tocco perche' chi e' arrivato dopo la legga.
+  const wide = r.type === "connect";
+  const q = wide
+    ? `<p class="q small clamp">${data.slide.question}</p><span class="qmore">${T.show_all}</span>`
+    : `<p class="q">${data.slide.question}</p>`;
+  root.innerHTML = `<div class="card${wide?" cwide":""}">${q}${body}</div>
     <p class="code">${T.code_label} ${code}</p>`;
+  const more = $(".qmore");
+  if (more) more.onclick = () => {
+    const el = $(".q");
+    el.classList.toggle("clamp");
+    more.textContent = el.classList.contains("clamp") ? T.show_all : T.show_less;
+  };
 }
 
 function renderComparison(post, pair) {
@@ -791,10 +852,24 @@ function renderComparison(post, pair) {
 function connectMatrix(r) {
   if (!r.left.length || !r.right.length || !r.n) return `<p class="muted">${T.no_answers}</p>`;
   const max = Math.max(1, r.max||1);
-  const head = `<tr><th></th>${r.right.map(c=>`<th>${c.label}</th>`).join("")}</tr>`;
-  const body = r.matrix.map((row,i)=>`<tr><th>${r.left[i].label}</th>${
-    row.map(v=>`<td style="background:rgba(22,163,171,${v?(0.15+0.6*v/max).toFixed(2):0})">${v||""}</td>`).join("")}</tr>`).join("");
-  return `<table class="cmx">${head}${body}</table><p class="muted" style="margin-top:8px">${r.n} ${T.votes}</p>`;
+  const bg = v => `rgba(22,163,171,${(0.15+0.6*v/max).toFixed(2)})`;
+  // schermo largo: la griglia
+  // la cella d'angolo e' appiccicata quanto i nomi di riga: senza, scorrendo le
+  // etichette di colonna passerebbero DIETRO la colonna dei nomi e resterebbero
+  // visibili, perche' li' non c'e' niente a coprirle
+  const head = `<tr><th class="rowh corner"></th>${r.right.map(c=>`<th class="colh">${c.label}</th>`).join("")}</tr>`;
+  const body = r.matrix.map((row,i)=>`<tr><th class="rowh">${r.left[i].label}</th>${
+    row.map(v=>`<td class="${v?"":"zero"}"${v?` style="background:${bg(v)}"`:""}>${v||0}</td>`).join("")
+  }</tr>`).join("");
+  const grid = `<div class="cxgrid cxscroll"><table class="cxm">${head}${body}</table></div>`;
+  // telefono: un blocco per principio. Le righe senza collegamenti non compaiono:
+  // in una matrice sparsa sarebbero la maggioranza, e non dicono niente.
+  const list = `<div class="cxlist">${r.matrix.map((row,i)=>{
+    const chips = row.map((v,j) => v ? `<span class="cxchip">${r.right[j].label} <b>${v}</b></span>` : "")
+                     .filter(Boolean).join("");
+    return chips ? `<div class="cxrow"><div class="cxname">${r.left[i].label}</div><div>${chips}</div></div>` : "";
+  }).join("")}</div>`;
+  return grid + list + `<p class="muted" style="margin-top:8px">${r.n} ${T.votes}</p>`;
 }
 
 function bar(name, count, max, correct) {
