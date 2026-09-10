@@ -18,7 +18,11 @@
   .grid { display:grid; grid-template-columns:280px 1fr; height:100vh; min-height:0; }
   .side { background:#14171d; padding:18px; border-right:1px solid var(--bar);
           display:flex; flex-direction:column; min-height:0; overflow:hidden; }
-  .main { padding:32px 40px; overflow-y:auto; min-height:0; }
+  /* `min-width:0` non e' decorativo: una cella di grid parte da `min-width:auto`,
+     cioe' non si stringe sotto la larghezza minima del contenuto. Senza, una
+     matrice larga allarga la COLONNA invece di scorrere dentro il suo
+     contenitore, e a scorrere in orizzontale finisce la pagina intera. */
+  .main { padding:32px 40px; overflow-y:auto; min-height:0; min-width:0; }
   .slidelist, .main { scrollbar-width:thin; scrollbar-color:#2f3542 transparent; }
   .slidelist::-webkit-scrollbar, .main::-webkit-scrollbar { width:10px; }
   .slidelist::-webkit-scrollbar-track, .main::-webkit-scrollbar-track { background:transparent; }
@@ -86,6 +90,10 @@
         padding:44px 20px; text-align:center; color:var(--muted); }
   .layout { display:grid; grid-template-columns:1fr; gap:24px; }
   .layout.mod { grid-template-columns:1fr 320px; }
+  /* stessa ragione di `min-width:0` su .main: senza, la colonna dei risultati
+     si allarga fino alla matrice invece di lasciarla scorrere, e con il pannello
+     di moderazione aperto finisce sotto di esso */
+  .layout > * { min-width:0; }
   .barrow { display:flex; align-items:center; gap:14px; margin:14px 0; }
   .barrow .name { width:34%; font-size:1.05rem; }
   .bartrack { flex:1; background:var(--bar); border-radius:8px; height:36px; overflow:hidden; }
@@ -129,6 +137,30 @@
   .cmatrix th, .cmatrix td { border:1px solid var(--bar); padding:7px 12px; text-align:center; font-size:.85rem; }
   .cmatrix th { color:var(--muted); font-weight:600; }
   .cmatrix th:first-child, .cmatrix td:first-child { text-align:left; }
+  /* La matrice di `connect` ha le sue regole, non quelle di .cmatrix: le
+     etichette di colonna stanno in piedi. Nove criteri con nomi tedeschi
+     stampati per lungo fanno una tabella da 900px, quindici la portano fuori
+     dalla colonna anche su un proiettore. Le tessere sono piu' grandi che
+     sull'audience: qui si legge dal fondo dell'aula. La matrice resta sopra il
+     grafo, che continua a dire la stessa cosa in un'altra lingua. */
+  .cxscroll { overflow-x:auto; overflow-y:hidden; margin-top:10px;
+        scrollbar-width:thin; scrollbar-color:#2f3542 transparent; }
+  .cxscroll::-webkit-scrollbar { height:9px; }
+  .cxscroll::-webkit-scrollbar-thumb { background:#2f3542; border-radius:6px; }
+  table.cxm { border-collapse:separate; border-spacing:4px; }
+  table.cxm th.colh { writing-mode:vertical-rl; transform:rotate(180deg); white-space:normal;
+        max-height:200px; padding:6px 3px; color:var(--muted); font-weight:600; font-size:.78rem;
+        vertical-align:bottom; text-align:left; line-height:1.15; }
+  /* i nomi di riga restano fermi mentre si scorre, e con loro la cella d'angolo:
+     senza, le etichette di colonna passano dietro la colonna dei nomi e restano
+     visibili, perche' li' non c'e' niente a coprirle */
+  table.cxm th.rowh { text-align:right; font-weight:600; font-size:.9rem; padding-right:11px;
+        white-space:nowrap; position:sticky; left:0; z-index:2; background:var(--bg); }
+  table.cxm th.corner { z-index:3; }
+  table.cxm td { width:40px; min-width:40px; height:40px; text-align:center; border-radius:7px;
+        background:#1c2027; color:#04201f; font-weight:800; font-size:.95rem;
+        font-variant-numeric:tabular-nums; }
+  table.cxm td.zero { color:transparent; }
   .modbox { background:#14171d; border:1px solid var(--bar); border-radius:12px; padding:14px; }
   .modbox h3 { margin:0 0 10px; font-size:.8rem; color:var(--muted); letter-spacing:.08em; }
   .moditem { display:flex; gap:8px; align-items:flex-start; padding:9px 0; border-bottom:1px solid #20242d; }
@@ -664,10 +696,12 @@ function renderModeration(items) {
 function connectMatrix(r) {
   if (!r.left.length || !r.right.length) return "";
   const max = Math.max(1, r.max||1);
-  const head = `<tr><th></th>${r.right.map(c=>`<th>${c.label}</th>`).join("")}</tr>`;
-  const body = r.matrix.map((row,i)=>`<tr><th>${r.left[i].label}</th>${
-    row.map(v=>`<td style="background:rgba(22,163,171,${v?(0.15+0.6*v/max).toFixed(2):0})">${v||""}</td>`).join("")}</tr>`).join("");
-  return `<table class="cmatrix">${head}${body}</table>`;
+  const bg = v => `rgba(22,163,171,${(0.15+0.6*v/max).toFixed(2)})`;
+  const head = `<tr><th class="rowh corner"></th>${r.right.map(c=>`<th class="colh">${c.label}</th>`).join("")}</tr>`;
+  const body = r.matrix.map((row,i)=>`<tr><th class="rowh">${r.left[i].label}</th>${
+    row.map(v=>`<td class="${v?"":"zero"}"${v?` style="background:${bg(v)}"`:""}>${v||0}</td>`).join("")
+  }</tr>`).join("");
+  return `<div class="cxscroll"><table class="cxm">${head}${body}</table></div>`;
 }
 
 function connectBipartite(r) {
