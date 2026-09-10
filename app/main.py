@@ -134,6 +134,25 @@ def audience_page():
     return FileResponse(STATIC_DIR / "audience.html")
 
 
+@app.get("/join")
+def join_page():
+    """Come "/", ma entrando sempre dalla schermata del codice.
+
+    Il telefono ricorda l'ultima stanza, e la ricorda apposta: chi ricarica a
+    meta' sessione deve ritrovarsi dentro, non a ridigitare. Il prezzo e' che
+    chi ha gia' partecipato a una sessione non ha piu' modo di cambiarla — la
+    pagina rientra da sola in quella di prima e il campo del codice non
+    ricompare, se non quando il server risponde 404.
+
+    Un path dedicato e' l'uscita: si dice a voce ("roompulse.borant.eu/join"),
+    non chiede di svuotare la cache del browser, e la pagina servita e' la
+    stessa — a scartare il codice ricordato ci pensa il suo JS, leggendo il
+    proprio path. **In `gateway` va tenuto fra le @pubbliche**, come "/": e'
+    audience, e se resta fuori chi lo apre incontra l'SSO.
+    """
+    return FileResponse(STATIC_DIR / "audience.html")
+
+
 def _al_login():
     """Dove mandare chi non e' autenticato su una pagina che lo richiede.
 

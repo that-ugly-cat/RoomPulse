@@ -10,3 +10,4 @@ __pycache__/
 # uv.lock È committato (deploy riproducibili)
 # DESIGN.md è un documento di design interno, non pubblicato sul repo
 DESIGN.md
+.claude/

@@ -142,7 +142,7 @@ audience, `/api/runs/*` entirely presenter.
 
 ```
 roompulse.borant.eu {
-    @pubbliche path / /login /guide /static/* /qr/* /api/live/* /api/auth-config /api/i18n /api/login /api/register /api/logout
+    @pubbliche path / /join /login /guide /static/* /qr/* /api/live/* /api/auth-config /api/i18n /api/login /api/register /api/logout
     handle @pubbliche {
         import noforge
         import nocookie
@@ -156,7 +156,10 @@ roompulse.borant.eu {
 ```
 
 `/` is the audience page and it loads its assets from `/static`, so keeping
-`/static/*` out is correctness and not a speed tweak. `/login`, `/api/login` and
+`/static/*` out is correctness and not a speed tweak. `/join` is the same page
+asked to forget the remembered room, so it is audience too and belongs on the
+same line: gated, it would answer someone trying to enter a *second* room with
+a login screen for a product they have no account in. `/login`, `/api/login` and
 `/api/register` stay out because the app already refuses them in this mode:
 gating them instead would answer a login attempt with a redirect to a different
 login, which reads as a loop to whoever is looking at it.

@@ -151,7 +151,18 @@ if (!token) { token = Math.random().toString(36).slice(2) + Date.now().toString(
               localStorage.setItem("rp_token", token); }
 
 const params = new URLSearchParams(location.search);
-let code = params.get("c") || localStorage.getItem("rp_code") || "";
+// /join = "entra in un'altra stanza": scarta il codice ricordato invece di
+// rientrare da solo dove si era. Il ricordo serve a chi ricarica a meta'
+// sessione, ma senza una via d'uscita inchioda alla stanza di prima.
+// Dopo averlo scartato l'indirizzo torna "/": /join e' un gesto, non un posto
+// dove stare — chi ricarica in stanza deve ritrovarcisi, non ripartire dal
+// campo del codice.
+const forceJoin = /^\/join\/?$/.test(location.pathname);
+if (forceJoin) {
+  localStorage.removeItem("rp_code");
+  history.replaceState(null, "", "/" + location.search);
+}
+let code = params.get("c") || (forceJoin ? "" : localStorage.getItem("rp_code") || "");
 let lastSig = "";
 let qaSlideId = null;    // per ridisegnare la shell QA solo al cambio slide
 let groupsSlideId = null; // per assegnare il gruppo una sola volta per slide

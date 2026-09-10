@@ -60,7 +60,7 @@ Three surfaces, one fixed join code per deck:
 |---|---|---|
 | **Editor** | presenter | build decks, add/reorder/inspect slides, set the API key |
 | **Presenter** | presenter | the projection: active question, live results, controls, headcount, QR + code |
-| **Audience** | public | enter the code / scan the QR, answer, see results when revealed |
+| **Audience** | public | enter the code / scan the QR, answer, see results when revealed. `/join` drops the remembered room, for entering a different code |
 | **MCP** | a model, with your key | read decks, runs and results; write a deck. Never drives the live vote |
 
 The audience follows the presenter via light polling (no websockets). A deck (template) can
@@ -87,7 +87,7 @@ uv run uvicorn app.main:app --port 8080
 Then open:
 
 - **Login / editor** — http://localhost:8080/login  (demo: `spit@local` / `roompulse`)
-- **Audience** — http://localhost:8080/  (the seed prints the join code)
+- **Audience** — http://localhost:8080/  (the seed prints the join code; /join to enter another one)
 
 Create your own presenter account:
 
