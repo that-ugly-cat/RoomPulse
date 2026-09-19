@@ -1,0 +1,36 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: roompulse
+    restart: unless-stopped
+    # Bound to loopback, not 0.0.0.0: the gate's design rests on the bind.
+    ports:
+      - "127.0.0.1:8011:8080"
+    # Every secret lives here and nowhere else. The previous compose repeated
+    # JWT_SECRET inline, in a 664 file that .gitignore did not cover - the two
+    # values were identical, so dropping the override changed nothing but the
+    # exposure. Rotate it anyway if it was ever shared.
+    env_file:
+      - .env
+    # Was the only app in the estate without a limit. 400m: it holds live
+    # polling state for a room, not a corpus.
+    mem_limit: 400m
+    # Bind mount, not a named volume. Until 19 Sep 2026 this was the only app
+    # keeping its database in `roompulse_roompulse_data`, which is why a plain
+    # copy of /opt/apps never carried it, and why a restore needed `docker exec`
+    # where every other app needed a path. RP_DB=/data/roompulse.db is baked
+    # into the Dockerfile, so the destination stays /data.
+    volumes:
+      - ./data:/data
+    # `borant_provision` serve solo al provisioning anticipato (DEPLOY.md 6-bis):
+    # e la rete su cui il gate raggiunge questo container per nome, senza passare
+    # da Caddy. La porta pubblicata resta sul loopback, come sempre.
+    networks:
+      - default
+      - borant_provision
+
+networks:
+  borant_provision:
+    external: true

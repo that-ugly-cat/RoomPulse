@@ -11,3 +11,9 @@ __pycache__/
 # DESIGN.md è un documento di design interno, non pubblicato sul repo
 DESIGN.md
 .claude/
+
+# il database vive qui dal 19 set 2026 (bind mount, era un volume nominato)
+data/
+*.bak-*
+*.db-shm
+*.db-wal
